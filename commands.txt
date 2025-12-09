@@ -1,0 +1,3 @@
+.\venv\Scripts\Activate.ps1
+
+dotnet run --project .\src\CopilotBackend\CopilotBackend.AppHost\CopilotBackend.AppHost.csproj -c Release

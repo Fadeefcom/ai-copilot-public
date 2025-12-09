@@ -1,0 +1,36 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36109.1 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CopilotBackend.AppHost", "CopilotBackend.AppHost\CopilotBackend.AppHost.csproj", "{438B3031-5E07-44FE-94D4-03A83A161CE8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CopilotBackend.ServiceDefaults", "CopilotBackend.ServiceDefaults\CopilotBackend.ServiceDefaults.csproj", "{45845A3D-1F69-6C4B-82B0-0E145AE2CB04}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CopilotBackend.ApiService", "CopilotBackend.ApiService\CopilotBackend.ApiService.csproj", "{F938C74B-4886-465E-890A-06BF42714FB3}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{438B3031-5E07-44FE-94D4-03A83A161CE8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{438B3031-5E07-44FE-94D4-03A83A161CE8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{438B3031-5E07-44FE-94D4-03A83A161CE8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{438B3031-5E07-44FE-94D4-03A83A161CE8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{45845A3D-1F69-6C4B-82B0-0E145AE2CB04}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{45845A3D-1F69-6C4B-82B0-0E145AE2CB04}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{45845A3D-1F69-6C4B-82B0-0E145AE2CB04}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{45845A3D-1F69-6C4B-82B0-0E145AE2CB04}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F938C74B-4886-465E-890A-06BF42714FB3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F938C74B-4886-465E-890A-06BF42714FB3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F938C74B-4886-465E-890A-06BF42714FB3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F938C74B-4886-465E-890A-06BF42714FB3}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {48DBC8E1-4011-4645-BFA1-4C5F75F5859F}
+	EndGlobalSection
+EndGlobal
