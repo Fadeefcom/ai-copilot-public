@@ -1,8 +1,11 @@
-using System.Text;
 using CopilotBackend.ApiService.Abstractions;
+using CopilotBackend.ApiService.Configuration;
 using CopilotBackend.ApiService.Routes;
 using CopilotBackend.ApiService.Services;
+using CopilotBackend.ApiService.Services.Ai;
+using CopilotBackend.ApiService.Services.Ai.Providers;
 using Microsoft.AspNetCore.Mvc.Abstractions;
+using System.Text;
 
 namespace CopilotBackend.ApiService;
 
@@ -17,30 +20,47 @@ public class Program
         
         var builder = WebApplication.CreateBuilder(args);
 
+        using CopilotBackend.ApiService.Abstractions;
+        using CopilotBackend.ApiService.Configuration;
+        using CopilotBackend.ApiService.Routes;
+        using CopilotBackend.ApiService.Services;
+        using CopilotBackend.ApiService.Services.Ai;
+        using CopilotBackend.ApiService.Services.Ai.Providers;
+
+        var builder = WebApplication.CreateBuilder(args);
+
+        // Configuration
+        builder.Services.Configure<AiOptions>(builder.Configuration.GetSection(AiOptions.SectionName));
+        builder.Services.Configure<LlmOptions>(builder.Configuration.GetSection(LlmOptions.SectionName));
+
+        // Core Services
+        builder.Services.AddServiceDefaults();
         builder.Services.AddLogging();
         builder.Services.AddOpenApi();
-        
         builder.Services.AddHttpClient();
-        builder.Services.AddSingleton<DeepgramAudioService>();
-        builder.Services.AddSingleton<IAiService, OpenAiService>();
-        builder.Services.AddSingleton<IAiService, GrokService>();
-        builder.Services.AddSingleton<ConversationContextService>();
-        builder.Services.AddTransient<IContextCompressor, LocalLlmCompressor>();
-        builder.Services.AddTransient<ContextManager>();
-        builder.Services.AddSingleton<DeepgramAudioService>();
-        builder.Services.AddTransient<OpenAiService>();
 
-        var app = builder.Build();        
-        
-        app.Urls.Clear();
-        app.Urls.Add(backendUrl);
-        
+        // Domain Services
+        builder.Services.AddSingleton<ConversationContextService>();
+        builder.Services.AddSingleton<DeepgramAudioService>();
+        builder.Services.AddTransient<ContextManager>();
+        builder.Services.AddTransient<IContextCompressor, LocalLlmCompressor>();
+
+        // AI Stack
+        builder.Services.AddTransient<PromptManager>();
+        builder.Services.AddTransient<AiOrchestrator>();
+        builder.Services.AddTransient<ILlmProvider, OpenAiProvider>();
+        builder.Services.AddTransient<ILlmProvider, GrokProvider>();
+
+        var app = builder.Build();
+
+        app.MapDefaultEndpoints();
+
         if (app.Environment.IsDevelopment())
         {
             app.MapOpenApi();
         }
 
-        app.MapRoutesGroup();
+        app.MapApiRoutes();
 
         app.Run();
     }
