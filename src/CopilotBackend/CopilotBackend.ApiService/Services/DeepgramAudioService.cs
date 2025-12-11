@@ -14,8 +14,6 @@ public class DeepgramAudioService : IDisposable
     private readonly ILogger<DeepgramAudioService> _logger;
     private CancellationTokenSource? _cts;
 
-    // Инкапсулируем логику клиента и захвата в локальные классы или кортежи, 
-    // чтобы не загрязнять основной класс полями
     private readonly List<AudioStreamer> _streamers = new();
 
     public bool IsRunning => _streamers.Any();
@@ -79,6 +77,7 @@ public class DeepgramAudioService : IDisposable
     {
         private readonly ListenWebSocketClient _client;
         private readonly ConversationContextService _ctx;
+        private readonly ILogger _logger;
         private WasapiCapture? _capture;
         private readonly string _apiKey;
 
@@ -87,6 +86,7 @@ public class DeepgramAudioService : IDisposable
             _apiKey = apiKey;
             _ctx = ctx;
             _client = new ListenWebSocketClient(_apiKey);
+           _logger = logger;
         }
 
         public async Task InitializeAsync(SpeakerRole role, string language, DataFlow dataFlow)
@@ -98,6 +98,8 @@ public class DeepgramAudioService : IDisposable
                 if (!string.IsNullOrWhiteSpace(transcript))
                 {
                     _ctx.AddMessage(role, transcript);
+                    _logger.LogInformation($"{role} - {transcript}");
+                    
                 }
             });
 

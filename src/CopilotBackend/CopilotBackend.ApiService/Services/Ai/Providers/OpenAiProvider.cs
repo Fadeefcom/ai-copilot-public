@@ -24,7 +24,7 @@ public class OpenAiProvider : ILlmProvider
     {
         var request = new
         {
-            model = "gpt-4.1-mini",
+            model = "gpt-5-nano",
             messages = messages.Select(m => new { role = m.Role, content = m.Content }),
             temperature = 0.4,
             top_p = 0.95

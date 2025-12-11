@@ -10,6 +10,11 @@ public static class RouteExtensions
     {
         var api = app.MapGroup("/api");
 
+        api.MapGet("", () =>
+        {
+            return Results.Ok("healthy");
+        });
+
         api.MapPost("/message", async ([FromBody] MessageRequest req, [FromServices] AiOrchestrator orchestrator) =>
         {
             try
