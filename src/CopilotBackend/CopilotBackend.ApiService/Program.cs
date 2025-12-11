@@ -20,21 +20,11 @@ public class Program
         
         var builder = WebApplication.CreateBuilder(args);
 
-        using CopilotBackend.ApiService.Abstractions;
-        using CopilotBackend.ApiService.Configuration;
-        using CopilotBackend.ApiService.Routes;
-        using CopilotBackend.ApiService.Services;
-        using CopilotBackend.ApiService.Services.Ai;
-        using CopilotBackend.ApiService.Services.Ai.Providers;
-
-        var builder = WebApplication.CreateBuilder(args);
-
         // Configuration
         builder.Services.Configure<AiOptions>(builder.Configuration.GetSection(AiOptions.SectionName));
         builder.Services.Configure<LlmOptions>(builder.Configuration.GetSection(LlmOptions.SectionName));
 
         // Core Services
-        builder.Services.AddServiceDefaults();
         builder.Services.AddLogging();
         builder.Services.AddOpenApi();
         builder.Services.AddHttpClient();
@@ -53,7 +43,8 @@ public class Program
 
         var app = builder.Build();
 
-        app.MapDefaultEndpoints();
+        app.Urls.Clear();
+        app.Urls.Add(backendUrl);
 
         if (app.Environment.IsDevelopment())
         {
