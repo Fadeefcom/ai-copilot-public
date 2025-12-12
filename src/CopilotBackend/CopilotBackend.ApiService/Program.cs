@@ -4,6 +4,7 @@ using CopilotBackend.ApiService.Routes;
 using CopilotBackend.ApiService.Services;
 using CopilotBackend.ApiService.Services.Ai;
 using CopilotBackend.ApiService.Services.Ai.Providers;
+using CopilotBackend.ApiService.Services.Hubs;
 using Microsoft.AspNetCore.Mvc.Abstractions;
 using System.Text;
 
@@ -28,6 +29,7 @@ public class Program
         builder.Services.AddLogging();
         builder.Services.AddOpenApi();
         builder.Services.AddHttpClient();
+        builder.Services.AddSignalR();
 
         // Domain Services
         builder.Services.AddSingleton<ConversationContextService>();
@@ -52,6 +54,7 @@ public class Program
         }
 
         app.MapApiRoutes();
+        app.MapHub<SmartHub>("/hubs/smart");
 
         app.Run();
     }

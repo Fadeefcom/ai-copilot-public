@@ -5,7 +5,8 @@ namespace CopilotBackend.ApiService.Services;
 public enum SpeakerRole
 {
     Me,
-    Companion
+    Companion,
+    System
 }
 
 public class ConversationMessage

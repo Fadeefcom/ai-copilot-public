@@ -7,9 +7,11 @@ from PyQt6.QtGui import QFont, QKeyEvent
 from dotenv import load_dotenv
 import ctypes
 import re
+from signalrcore.hub_connection_builder import HubConnectionBuilder
 
 load_dotenv()
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:57875/api")
+HUB_URL = os.getenv("HUB_URL", "http://localhost:57875/hubs/smart")
 
 WDA_EXCLUDEFROMCAPTURE = 0x00000011
 SetWindowDisplayAffinity = None
@@ -22,11 +24,53 @@ if sys.platform == "win32":
         pass
 
 UI_TEXTS = {
-    'ru': {'title': 'AI-Суфлер', 'start': 'Start', 'stop': 'Stop', 'say_btn': 'Что сказать', 'followup_btn': 'Уточнить', 'assist_btn': 'Помощь с последним вопросом', 'lang_label': 'Язык'},
-    'en': {'title': 'AI Copilot', 'start': 'Start', 'stop': 'Stop', 'say_btn': 'What to say', 'followup_btn': 'Follow up', 'assist_btn': 'Assist', 'lang_label': 'Lang'}
+    'ru': {'title': 'AI-Суфлер', 'start': 'Start', 'stop': 'Stop', 'say_btn': 'Что сказать', 'followup_btn': 'Уточнить', 'assist_btn': 'Помощь с последним вопросом', 'lang_label': 'Язык', 'smart_btn': 'Smart Mode'},
+    'en': {'title': 'AI Copilot', 'start': 'Start', 'stop': 'Stop', 'say_btn': 'What to say', 'followup_btn': 'Follow up', 'assist_btn': 'Assist', 'lang_label': 'Lang', 'smart_btn': 'Smart Mode'}
 }
 
 MODELS = ["Grok (grok-4)", "OpenAI GPT-4.1 Mini"]
+
+class SignalRWorker(QThread):
+    response_received = pyqtSignal(str)
+    status_received = pyqtSignal(str)
+    
+    def __init__(self, model_name):
+        super().__init__()
+        self.model_name = model_name
+        self.connection = None
+
+    def run(self):
+        try:
+            self.connection = HubConnectionBuilder()\
+                .with_url(HUB_URL)\
+                .build()
+
+            self.connection.on("ReceiveResponse", self.handle_response)
+            self.connection.on("ReceiveStatus", self.handle_status)
+            self.connection.on("ReceiveError", self.handle_status)
+            
+            self.connection.start()
+            self.connection.send("ActivateSmartMode", [self.model_name])
+            
+            # Keep thread alive
+            while self.connection and self.connection.transport.state == 1:
+                self.msleep(100)
+                
+        except Exception as e:
+            self.status_received.emit(f"SignalR Error: {e}")
+
+    def handle_response(self, args):
+        if args and len(args) > 0:
+            self.response_received.emit(args[0])
+
+    def handle_status(self, args):
+        if args and len(args) > 0:
+            self.status_received.emit(f"System: {args[0]}")
+
+    def stop(self):
+        if self.connection:
+            self.connection.stop()
+            self.connection = None
 
 class BackendWorker(QThread):
     finished_signal = pyqtSignal(str)
@@ -112,7 +156,9 @@ class ChatWindow(QMainWindow):
         self.texts = UI_TEXTS[self.current_lang]
         self.current_model = MODELS[0]
         self.started = False
-        self.threads = []  # добавить список для всех активных потоков
+        self.smart_mode_active = False
+        self.threads = []
+        self.signalr_worker = None
         self.setWindowTitle(self.texts['title'])
         self.setGeometry(50, 50, 600, 700)
         self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
@@ -123,7 +169,8 @@ class ChatWindow(QMainWindow):
 
     def closeEvent(self, event):
         self.input_box.send_signal.disconnect()
-        # остановить все потоки
+        if self.signalr_worker:
+            self.signalr_worker.stop()
         for thread in self.threads:
             if thread.isRunning():
                 if hasattr(thread, 'stop'):
@@ -145,9 +192,7 @@ class ChatWindow(QMainWindow):
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(5,5,5,5)
 
-        # Верхний ряд: Lang+Dropdown слева, Start/Stop по центру, Таймер справа
         top_layout = QHBoxLayout()
-        # Левый блок
         left_box = QHBoxLayout()
         self.lang_label = QLabel(self.texts['lang_label'])
         self.lang_dropdown = QComboBox()
@@ -158,7 +203,6 @@ class ChatWindow(QMainWindow):
         left_box.addWidget(self.lang_dropdown)
         top_layout.addLayout(left_box)
 
-        # Центр: кнопка Start/Stop
         center_box = QHBoxLayout()
         center_box.addStretch()
         self.start_button = QPushButton(self.texts['start'])
@@ -175,7 +219,6 @@ class ChatWindow(QMainWindow):
         center_box.addStretch()
         top_layout.addLayout(center_box)
 
-        # Правый блок: таймер
         self.timer_label = QLabel('00:00:00')
         self.timer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.timer_label.setVisible(False)
@@ -207,16 +250,14 @@ class ChatWindow(QMainWindow):
         self.say_button.setStyleSheet(style_btn)
         self.say_button.setEnabled(False)
         button_layout.addWidget(self.say_button)
-        self.followup_button = QPushButton(self.texts['followup_btn'])
-        self.followup_button.clicked.connect(lambda: self.send_button_prompt('followup'))
-        self.followup_button.setStyleSheet(style_btn)
-        self.followup_button.setEnabled(False)
-        button_layout.addWidget(self.followup_button)
-        self.assist_button = QPushButton(self.texts['assist_btn'])
-        self.assist_button.clicked.connect(lambda: self.send_button_prompt('assist'))
-        self.assist_button.setStyleSheet(style_btn)
-        self.assist_button.setEnabled(False)
-        button_layout.addWidget(self.assist_button)
+        
+        self.smart_button = QPushButton(self.texts['smart_btn'])
+        self.smart_button.clicked.connect(self.toggle_smart_mode)
+        self.smart_button.setStyleSheet(style_btn)
+        self.smart_button.setCheckable(True)
+        self.smart_button.setEnabled(False)
+        button_layout.addWidget(self.smart_button)
+
         main_layout.addLayout(button_layout)
 
         bottom_layout = QHBoxLayout()
@@ -248,26 +289,7 @@ class ChatWindow(QMainWindow):
             return
 
         self.add_message(text, is_user=True)
-
-        self.typing_label = ChatMessage("...", is_user=False)
-        self.chat_layout.addWidget(self.typing_label)
-        self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
-
-        self.typing_thread = TypingIndicator()
-        self.threads.append(self.typing_thread)
-        self.typing_thread.update_signal.connect(lambda dots: self.typing_label.set_markdown(self.typing_label.findChild(QLabel), dots))
-        self.typing_thread.start()
-
-        current_model = self.model_dropdown.currentText()
-        worker = BackendWorker(text, current_model)
-        self.threads.append(worker)
-        def handle_response(resp_text):
-            self.typing_thread.stop()
-            self.chat_layout.removeWidget(self.typing_label)
-            self.typing_label.deleteLater()
-            self.add_message(resp_text, is_user=False)
-        worker.finished_signal.connect(handle_response)
-        worker.start()
+        self.send_to_backend(text)
 
     def send_message(self):
         text = self.input_box.toPlainText().strip()
@@ -279,8 +301,24 @@ class ChatWindow(QMainWindow):
 
     def send_to_backend(self, user_text):
         current_model = self.model_dropdown.currentText()
+        
+        self.typing_label = ChatMessage("...", is_user=False)
+        self.chat_layout.addWidget(self.typing_label)
+        self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
+        
+        self.typing_thread = TypingIndicator()
+        self.threads.append(self.typing_thread)
+        self.typing_thread.update_signal.connect(lambda dots: self.typing_label.set_markdown(self.typing_label.findChild(QLabel), dots))
+        self.typing_thread.start()
+
         worker = BackendWorker(user_text, current_model)
-        worker.finished_signal.connect(lambda text: self.add_message(text))
+        self.threads.append(worker)
+        def handle_response(resp_text):
+            self.typing_thread.stop()
+            self.chat_layout.removeWidget(self.typing_label)
+            self.typing_label.deleteLater()
+            self.add_message(resp_text, is_user=False)
+        worker.finished_signal.connect(handle_response)
         worker.start()
 
     def on_lang_dropdown_change(self, text):
@@ -298,11 +336,10 @@ class ChatWindow(QMainWindow):
 
     def update_button_texts(self):
         self.say_button.setText(self.texts['say_btn'])
-        self.followup_button.setText(self.texts['followup_btn'])
-        self.assist_button.setText(self.texts['assist_btn'])
         self.start_button.setText(self.texts['start'])
         self.stop_button.setText(self.texts['stop'])
         self.lang_label.setText(self.texts['lang_label'])
+        self.smart_button.setText(self.texts['smart_btn'])
 
     def on_model_change(self, index):
         self.current_model = self.model_dropdown.currentText()
@@ -316,7 +353,6 @@ class ChatWindow(QMainWindow):
         self.audio_worker.finished_signal.connect(self.handle_start_response)
         self.audio_worker.start()
 
-
     def handle_start_response(self, result):
         if result.get('status') != 'started':
             self.add_message(f"Error: failed to start audio service", is_user=False)
@@ -327,34 +363,52 @@ class ChatWindow(QMainWindow):
         self.stop_button.setVisible(True)
         self.input_box.setEnabled(True)
         self.say_button.setEnabled(True)
-        self.followup_button.setEnabled(True)
-        self.assist_button.setEnabled(True)
+        self.smart_button.setEnabled(True)
         self.elapsed = QTime(0,0,0)
         self.timer_label.setText('00:00:00')
         self.timer_label.setVisible(True)
         self.timer.start(1000)
 
+        # Auto-activate smart mode logic if needed here
+        if self.smart_button.isChecked():
+            self.toggle_smart_mode()
+
     def on_stop(self):
         if not self.started:
             return
+        if self.signalr_worker:
+            self.signalr_worker.stop()
         self.audio_worker = AudioWorker("stop")
         self.threads.append(self.audio_worker)
         self.audio_worker.finished_signal.connect(self.handle_stop_response)
         self.audio_worker.start()
 
     def handle_stop_response(self, result):
-        if result.get('status') != 'stopped':
-            self.add_message(f"Error: failed to stop audio service", is_user=False)
         self.started = False
         self.lang_dropdown.setEnabled(True)
         self.start_button.setVisible(True)
         self.stop_button.setVisible(False)
         self.input_box.setEnabled(False)
         self.say_button.setEnabled(False)
-        self.followup_button.setEnabled(False)
-        self.assist_button.setEnabled(False)
+        self.smart_button.setEnabled(False)
         self.timer.stop()
         self.timer_label.setVisible(False)
+
+    def toggle_smart_mode(self):
+        if self.smart_button.isChecked():
+            self.smart_button.setStyleSheet("background-color: rgba(100,200,100,0.6);")
+            self.add_message("Smart Mode Initialized...", is_user=False)
+            
+            self.signalr_worker = SignalRWorker(self.current_model)
+            self.signalr_worker.response_received.connect(lambda text: self.add_message(text, False))
+            self.signalr_worker.status_received.connect(lambda text: self.add_message(text, False))
+            self.signalr_worker.start()
+        else:
+            self.smart_button.setStyleSheet("QPushButton{background-color: rgba(50,50,50,0.6); color:#E0E0E0; border-radius:4px; padding:6px;}")
+            if self.signalr_worker:
+                self.signalr_worker.stop()
+                self.signalr_worker = None
+            self.add_message("Smart Mode Deactivated.", is_user=False)
 
     def update_timer(self):
         self.elapsed = self.elapsed.addSecs(1)
@@ -374,7 +428,6 @@ class TypingIndicator(QThread):
     def stop(self):
         self.running = False
 
-
 def start_ui_loop(current_lang='en'):
     app = QApplication.instance()
     if app is None:
@@ -382,7 +435,6 @@ def start_ui_loop(current_lang='en'):
     main_window = ChatWindow(current_lang)
     main_window.show()
     return app, main_window
-
 
 if __name__ == "__main__":
     app, window = start_ui_loop('en')

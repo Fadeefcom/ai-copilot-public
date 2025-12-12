@@ -65,6 +65,19 @@ public class DeepgramAudioService : IDisposable
         _logger.LogInformation("Audio services stopped.");
     }
 
+    public string GetAndClearCompleteQuestion()
+    {
+        // Заглушка:
+        var currentBuffer = _transcription.GetFullTranscriptionText();
+        if (currentBuffer.EndsWith("?") || currentBuffer.Length > 100)
+        {
+            _transcription.Clear();
+            return currentBuffer;
+        }
+
+        return null;
+    }
+
     public void Clear() => _contextService.Clear();
 
     public void Dispose()
@@ -73,7 +86,7 @@ public class DeepgramAudioService : IDisposable
         _cts?.Dispose();
     }
 
-    private class AudioStreamer : IDisposable
+    protected class AudioStreamer : IDisposable
     {
         private readonly ListenWebSocketClient _client;
         private readonly ConversationContextService _ctx;
@@ -86,7 +99,7 @@ public class DeepgramAudioService : IDisposable
             _apiKey = apiKey;
             _ctx = ctx;
             _client = new ListenWebSocketClient(_apiKey);
-           _logger = logger;
+            _logger = logger;
         }
 
         public async Task InitializeAsync(SpeakerRole role, string language, DataFlow dataFlow)
@@ -99,7 +112,7 @@ public class DeepgramAudioService : IDisposable
                 {
                     _ctx.AddMessage(role, transcript);
                     _logger.LogInformation($"{role} - {transcript}");
-                    
+
                 }
             });
 
@@ -152,3 +165,4 @@ public class DeepgramAudioService : IDisposable
         }
     }
 }
+
