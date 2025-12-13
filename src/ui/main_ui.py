@@ -51,7 +51,7 @@ UI_TEXTS = {
     }
 }
 
-MODELS = ["Grok grok-4", "OpenAI gpt-4.1-mini", "OpenAI gpt-5-nano"]
+MODELS = ["Grok grok-4", "OpenAI gpt-4.1-mini", "OpenAI gpt-5-nano", "OpenAI gpt-5-mini"]
 
 class SignalRWorker(QThread):
     chunk_received = pyqtSignal(str)
@@ -130,24 +130,28 @@ class SignalRWorker(QThread):
 class BackendWorker(QThread):
     finished_signal = pyqtSignal(str)
     
-    def __init__(self, user_text, model):
+    def __init__(self, endpoint, payload):
         super().__init__()
-        self.user_text = user_text
-        self.model = model
+        self.endpoint = endpoint
+        self.payload = payload
         
     def run(self):
         try:
+            url = f"{BACKEND_URL}{self.endpoint}"
+            
             resp = requests.post(
-                f"{BACKEND_URL}/message", 
-                json={"Text": self.user_text, "Model": self.model}, 
-                timeout=30
+                url, 
+                json=self.payload, 
+                timeout=10
             )
+            
             if resp.status_code == 200:
                 response_text = resp.json().get("response", "No response")
             else:
-                response_text = f"Error: {resp.status_code}"
+                response_text = f"Error: {resp.status_code} - {resp.text}"
         except Exception as e:
             response_text = f"Request error: {e}"
+            
         self.finished_signal.emit(response_text)
 
 class AudioWorker(QThread):
@@ -407,30 +411,7 @@ class ChatWindow(QMainWindow):
         self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
         return msg
 
-    def send_button_prompt(self, prompt_type):
-        prompt_map = {
-            'say': self.texts['say_btn'],
-            'followup': self.texts['followup_btn'],
-            'assist': self.texts['assist_btn']
-        }
-        text = prompt_map.get(prompt_type, '')
-        if not text:
-            return
-
-        self.add_message(text, is_user=True)
-        self.send_to_backend(text)
-
-    def send_message(self):
-        text = self.input_box.toPlainText().strip()
-        if not text:
-            return
-        self.add_message(text, is_user=True)
-        self.input_box.clear()
-        self.send_to_backend(text)
-
-    def send_to_backend(self, user_text):
-        current_model = self.model_dropdown.currentText()
-        
+    def _initiate_request(self, endpoint, payload):
         self.typing_label = ChatMessage("...", is_user=False)
         self.chat_layout.addWidget(self.typing_label)
         self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
@@ -440,17 +421,46 @@ class ChatWindow(QMainWindow):
         self.typing_thread.update_signal.connect(lambda dots: self.typing_label.set_markdown(dots))
         self.typing_thread.start()
 
-        worker = BackendWorker(user_text, current_model)
+        worker = BackendWorker(endpoint, payload)
         self.threads.append(worker)
         
         def handle_response(resp_text):
             self.typing_thread.stop()
-            self.chat_layout.removeWidget(self.typing_label)
-            self.typing_label.deleteLater()
+            try:
+                self.chat_layout.removeWidget(self.typing_label)
+                self.typing_label.deleteLater()
+            except:
+                pass
             self.add_message(resp_text, is_user=False)
             
         worker.finished_signal.connect(handle_response)
         worker.start()
+
+    def send_to_backend(self, user_text):
+        current_model = self.model_dropdown.currentText()
+        self._initiate_request("/message", {"Text": user_text, "Model": current_model})
+
+    def send_message(self):
+        text = self.input_box.toPlainText().strip()
+        if not text:
+            return
+        self.add_message(text, is_user=True)
+        self.input_box.clear()
+        self.send_to_backend(text)
+
+    def send_button_prompt(self, prompt_type):
+        current_model = self.model_dropdown.currentText()
+        
+        if prompt_type == 'say':
+            self._initiate_request("/assist", {"Model": current_model})
+            
+        elif prompt_type == 'followup':
+            self._initiate_request("/followup", {"Model": current_model})
+            
+        elif prompt_type == 'assist':
+            text = self.texts['assist_btn']
+            self.add_message(text, is_user=True)
+            self.send_to_backend(text)
 
     def on_start(self):
         if self.started:

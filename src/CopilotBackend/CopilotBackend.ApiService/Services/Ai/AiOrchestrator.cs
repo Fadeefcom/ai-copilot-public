@@ -38,6 +38,34 @@ public class AiOrchestrator
         return await provider.GenerateResponseAsync(messages, version);
     }
 
+    public async Task<string> ProcessAssistRequestAsync(string modelName)
+    {
+        await _contextManager.CheckAndArchiveContextAsync();
+
+        var name = modelName.Split(' ')[0];
+        var version = modelName.Split(' ')[1];
+
+        var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
+        if (provider == null) throw new ArgumentException($"Model '{modelName}' not found.");
+
+        var messages = await _promptManager.BuildAssistMessagesAsync();
+        return await provider.GenerateResponseAsync(messages, version);
+    }
+
+    public async Task<string> ProcessFollowupRequestAsync(string modelName)
+    {
+        await _contextManager.CheckAndArchiveContextAsync();
+
+        var name = modelName.Split(' ')[0];
+        var version = modelName.Split(' ')[1];
+
+        var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
+        if (provider == null) throw new ArgumentException($"Model '{modelName}' not found.");
+
+        var messages = await _promptManager.BuildFollowupMessagesAsync();
+        return await provider.GenerateResponseAsync(messages, version);
+    }
+
     public async IAsyncEnumerable<string> StreamRequestAsync(string modelName, string prompt)
     {
         if (!_audioService.IsRunning)

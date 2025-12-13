@@ -9,11 +9,62 @@ public class PromptManager
     private readonly string _promptsFolder;
     private readonly string _userContextFile = "user.md";
     private readonly string _systemPromptFile = "system.md";
+    private readonly string _assistPromptFile = "assist.md";
+    private readonly string _followupPromptFile = "followup.md";
 
     public PromptManager(ConversationContextService contextService, IWebHostEnvironment env)
     {
         _contextService = contextService;
         _promptsFolder = Path.Combine(env.ContentRootPath, "promts");
+    }
+
+    public async Task<List<ChatMessage>> BuildAssistMessagesAsync()
+    {
+        var systemPrompt = await LoadPromptAsync(_assistPromptFile);
+        var userPersona = await LoadPromptAsync(_userContextFile);
+        var dialogueHistory = _contextService.GetFormattedLog();
+
+        var fullSystemMessage = new StringBuilder()
+            .AppendLine("--- SYSTEM INSTRUCTIONS ---")
+            .AppendLine(systemPrompt)
+            .AppendLine("--- USER PERSONA (ME) ---")
+            .AppendLine(userPersona)
+            .ToString();
+
+        var contextMessage = new StringBuilder()
+            .AppendLine("--- DIALOGUE TRANSCRIPT ---")
+            .AppendLine(dialogueHistory)
+            .AppendLine("--- TASK: SUGGEST NEXT RESPONSE FOR 'ME' ---")
+            .ToString();
+
+        return new List<ChatMessage>
+        {
+            new(ChatRole.System, fullSystemMessage),
+            new(ChatRole.User, contextMessage)
+        };
+    }
+
+    public async Task<List<ChatMessage>> BuildFollowupMessagesAsync()
+    {
+        var systemPrompt = await LoadPromptAsync(_followupPromptFile);
+        var dialogueHistory = _contextService.GetFormattedLog();
+
+        var fullSystemMessage = new StringBuilder()
+            .AppendLine("--- SYSTEM INSTRUCTIONS ---")
+            .AppendLine(systemPrompt)
+            .ToString();
+
+        var contextMessage = new StringBuilder()
+            .AppendLine("--- DIALOGUE TRANSCRIPT ---")
+            .AppendLine(dialogueHistory)
+            .AppendLine("--- TASK: GENERATE 5 FOLLOW-UP QUESTIONS ---")
+            .ToString();
+
+        return new List<ChatMessage>
+        {
+            new(ChatRole.System, fullSystemMessage),
+            new(ChatRole.User, contextMessage)
+        };
     }
 
     public async Task<List<ChatMessage>> BuildRequestMessagesAsync(string userInstruction)

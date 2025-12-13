@@ -86,8 +86,7 @@ public class ConversationContextService
 
             foreach (var msg in _history)
             {
-                var label = msg.Role == SpeakerRole.Me ? "Me" : "Companion";
-                sb.AppendLine($"[{label} {msg.Timestamp:HH:mm:ss}]: {msg.Text}");
+                sb.AppendLine($"[{msg.Role} {msg.Timestamp:HH:mm:ss}]: {msg.Text}");
             }
             return sb.ToString();
         }

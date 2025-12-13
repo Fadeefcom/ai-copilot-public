@@ -12,6 +12,12 @@ public class OpenAiProvider : ILlmProvider
     private readonly ILogger<OpenAiProvider> _logger;
     private readonly string _apiKey;
 
+    private static readonly HashSet<string> ModelsWithoutTemperature = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "gpt-5-nano",
+        "gpt-5-mini"
+    };
+
     public OpenAiProvider(
         IOpenAiApi api,
         ILogger<OpenAiProvider> logger,
@@ -33,17 +39,7 @@ public class OpenAiProvider : ILlmProvider
 
         _logger.LogInformation("Generating response using model: {Model}", modelToUse);
 
-        var request = new JsonObject
-        {
-            ["model"] = modelToUse,
-            ["messages"] = new JsonArray(messages.Select(m => new JsonObject
-            {
-                ["role"] = m.Role.ToString().ToLowerInvariant(),
-                ["content"] = m.Content
-            }).ToArray()),
-            ["temperature"] = 0.4,
-            ["top_p"] = 0.95
-        };
+        var request = CreateBaseRequest(messages, modelToUse);
 
         try
         {
@@ -75,18 +71,8 @@ public class OpenAiProvider : ILlmProvider
 
         _logger.LogInformation("Starting stream using model: {Model}", modelToUse);
 
-        var request = new JsonObject
-        {
-            ["model"] = modelToUse,
-            ["messages"] = new JsonArray(context.Select(m => new JsonObject
-            {
-                ["role"] = m.Role.ToString().ToLowerInvariant(),
-                ["content"] = m.Content
-            }).ToArray()),
-            ["stream"] = true,
-            ["temperature"] = 0.4,
-            ["top_p"] = 0.95
-        };
+        var request = CreateBaseRequest(context, modelToUse);
+        request["stream"] = true;
 
         HttpResponseMessage? responseMessage = null;
 
@@ -146,5 +132,41 @@ public class OpenAiProvider : ILlmProvider
                 yield return content;
             }
         }
+    }
+
+    private JsonObject CreateBaseRequest(IEnumerable<ChatMessage> messages, string model)
+    {
+        var request = new JsonObject
+        {
+            ["model"] = model,
+            ["messages"] = new JsonArray(messages.Select(m => new JsonObject
+            {
+                ["role"] = m.Role.ToString().ToLowerInvariant(),
+                ["content"] = m.Content
+            }).ToArray())
+        };
+
+        if (!IsFixedParameterModel(model))
+        {
+            request["temperature"] = 0.4;
+            request["top_p"] = 0.95;
+        }
+
+        return request;
+    }
+
+    private bool IsFixedParameterModel(string model)
+    {
+        if (ModelsWithoutTemperature.Contains(model))
+        {
+            return true;
+        }
+
+        if (model.StartsWith("o1-", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
     }
 }
