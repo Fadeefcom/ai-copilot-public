@@ -1,9 +1,11 @@
-﻿using Deepgram.Models.Listen.v2.WebSocket;
+﻿using CopilotBackend.ApiService.Configuration;
 using Deepgram;
+using Deepgram.Models.Listen.v2.WebSocket;
+using Microsoft.Extensions.Options;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
-using CopilotBackend.ApiService.Configuration;
-using Microsoft.Extensions.Options;
+using System.Text;
+using System.Threading.Tasks.Dataflow;
 
 namespace CopilotBackend.ApiService.Services;
 
@@ -13,6 +15,9 @@ public class DeepgramAudioService : IDisposable
     private readonly string _apiKey;
     private readonly ILogger<DeepgramAudioService> _logger;
     private CancellationTokenSource? _cts;
+
+    private readonly StringBuilder _companionBuffer = new();
+    private readonly object _bufferLock = new();
 
     private readonly List<AudioStreamer> _streamers = new();
 
@@ -35,11 +40,11 @@ public class DeepgramAudioService : IDisposable
 
         try
         {
-            var micStreamer = new AudioStreamer(_apiKey, _logger, _contextService);
+            var micStreamer = new AudioStreamer(_apiKey, _logger, _contextService, OnMessageReceived);
             await micStreamer.InitializeAsync(SpeakerRole.Me, language, DataFlow.Capture);
             _streamers.Add(micStreamer);
 
-            var speakerStreamer = new AudioStreamer(_apiKey, _logger, _contextService);
+            var speakerStreamer = new AudioStreamer(_apiKey, _logger, _contextService, OnMessageReceived);
             await speakerStreamer.InitializeAsync(SpeakerRole.Companion, language, DataFlow.Render);
             _streamers.Add(speakerStreamer);
 
@@ -65,16 +70,35 @@ public class DeepgramAudioService : IDisposable
         _logger.LogInformation("Audio services stopped.");
     }
 
-    public string GetAndClearCompleteQuestion()
+    private void OnMessageReceived(SpeakerRole role, string text)
     {
-        // Заглушка:
-        var currentBuffer = _transcription.GetFullTranscriptionText();
-        if (currentBuffer.EndsWith("?") || currentBuffer.Length > 100)
+        if (role == SpeakerRole.Companion)
         {
-            _transcription.Clear();
-            return currentBuffer;
+            lock (_bufferLock)
+            {
+                if (_companionBuffer.Length > 0) _companionBuffer.Append(" ");
+                _companionBuffer.Append(text);
+            }
         }
+    }
 
+    public string? GetAndClearCompleteQuestion()
+    {
+        lock (_bufferLock)
+        {
+            var text = _companionBuffer.ToString();
+
+            int questionIndex = text.IndexOf('?');
+
+            if (questionIndex != -1)
+            {
+                var question = text.Substring(0, questionIndex + 1).Trim();
+
+                _companionBuffer.Clear();
+
+                return question;
+            }
+        }
         return null;
     }
 
@@ -90,21 +114,22 @@ public class DeepgramAudioService : IDisposable
     {
         private readonly ListenWebSocketClient _client;
         private readonly ConversationContextService _ctx;
+        private readonly Action<SpeakerRole, string> _onMessage;
         private readonly ILogger _logger;
         private WasapiCapture? _capture;
         private readonly string _apiKey;
 
-        public AudioStreamer(string apiKey, ILogger logger, ConversationContextService ctx)
+        public AudioStreamer(string apiKey, ILogger logger, ConversationContextService ctx, Action<SpeakerRole, string> onMessage)
         {
             _apiKey = apiKey;
             _ctx = ctx;
             _client = new ListenWebSocketClient(_apiKey);
             _logger = logger;
+            _onMessage = onMessage;
         }
 
         public async Task InitializeAsync(SpeakerRole role, string language, DataFlow dataFlow)
         {
-            // Настройка подписки
             await _client.Subscribe((_, e) =>
             {
                 var transcript = e.Channel?.Alternatives?.FirstOrDefault()?.Transcript;
@@ -112,7 +137,7 @@ public class DeepgramAudioService : IDisposable
                 {
                     _ctx.AddMessage(role, transcript);
                     _logger.LogInformation($"{role} - {transcript}");
-
+                    _onMessage(role, transcript);
                 }
             });
 

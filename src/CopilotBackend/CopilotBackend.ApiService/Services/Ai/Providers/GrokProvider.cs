@@ -44,6 +44,62 @@ public class GrokProvider : ILlmProvider
         return ParseXAiResponse(json);
     }
 
+    public async IAsyncEnumerable<string> StreamResponseAsync(IReadOnlyList<ChatMessage> context)
+    {
+        var request = new
+        {
+            model = "grok-4-latest",
+            messages = context.Select(m => new { role = m.Role, content = m.Content }),
+            stream = true
+        };
+
+        using var httpReq = new HttpRequestMessage(HttpMethod.Post, "https://api.x.ai/v1/chat/completions")
+        {
+            Content = new StringContent(JsonSerializer.Serialize(request), Encoding.UTF8, "application/json")
+        };
+
+        httpReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+        httpReq.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using var response = await _httpClient.SendAsync(httpReq, HttpCompletionOption.ResponseHeadersRead);
+        response.EnsureSuccessStatusCode();
+
+        using var stream = await response.Content.ReadAsStreamAsync();
+        using var reader = new StreamReader(stream);
+
+        while (!reader.EndOfStream)
+        {
+            var line = await reader.ReadLineAsync();
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            if (line.StartsWith("data: [DONE]")) break;
+
+            if (line.StartsWith("data: "))
+            {
+                var json = line.Substring(6);
+                string? content = null;
+                try
+                {
+                    using var doc = JsonDocument.Parse(json);
+                    var choices = doc.RootElement.GetProperty("choices");
+                    if (choices.GetArrayLength() > 0)
+                    {
+                        var delta = choices[0].GetProperty("delta");
+                        if (delta.TryGetProperty("content", out var contentProp))
+                        {
+                            content = contentProp.GetString();
+                        }
+                    }
+                }
+                catch { }
+
+                if (!string.IsNullOrEmpty(content))
+                {
+                    yield return content;
+                }
+            }
+        }
+    }
+
     private string ParseXAiResponse(string json)
     {
         using var doc = JsonDocument.Parse(json);

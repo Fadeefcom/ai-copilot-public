@@ -21,6 +21,18 @@ public class Program
         
         var builder = WebApplication.CreateBuilder(args);
 
+        builder.Services.AddCors(options =>
+        {
+            options.AddPolicy("AllowAll",
+                policy =>
+                {
+                    policy.SetIsOriginAllowed(_ => true)
+                          .AllowAnyMethod()
+                          .AllowAnyHeader()
+                          .AllowCredentials();
+                });
+        });
+
         // Configuration
         builder.Services.Configure<AiOptions>(builder.Configuration.GetSection(AiOptions.SectionName));
         builder.Services.Configure<LlmOptions>(builder.Configuration.GetSection(LlmOptions.SectionName));
@@ -54,6 +66,7 @@ public class Program
         }
 
         app.MapApiRoutes();
+        app.UseCors("AllowAll");
         app.MapHub<SmartHub>("/hubs/smart");
 
         app.Run();

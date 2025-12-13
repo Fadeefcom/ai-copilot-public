@@ -44,6 +44,12 @@ public class PromptManager
         };
     }
 
+    public async Task<string> GetSystemPrompt()
+    {
+        var systemPrompt = await LoadPromptAsync(_systemPromptFile);
+        return systemPrompt.ToString();
+    }
+
     private async Task<string> LoadPromptAsync(string fileName)
     {
         var path = Path.Combine(_promptsFolder, fileName);

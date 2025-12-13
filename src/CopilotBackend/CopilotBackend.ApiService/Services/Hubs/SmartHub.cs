@@ -1,36 +1,41 @@
-﻿namespace CopilotBackend.ApiService.Services.Hubs;
+﻿using CopilotBackend.ApiService.Services.Ai;
+using Microsoft.AspNetCore.SignalR;
+using System.Runtime.CompilerServices;
+
+namespace CopilotBackend.ApiService.Services.Hubs;
 
 public class SmartHub : Hub
 {
     private readonly AiOrchestrator _orchestrator;
-    private readonly ConversationContextService _contextService;
+    private readonly DeepgramAudioService _audioService;
 
-    public SmartHub(AiOrchestrator orchestrator, ConversationContextService contextService)
+    public SmartHub(AiOrchestrator orchestrator, DeepgramAudioService audioService)
     {
         _orchestrator = orchestrator;
-        _contextService = contextService;
+        _audioService = audioService;
     }
 
-    public async Task ActivateSmartMode(string modelName)
+    public async IAsyncEnumerable<string> StreamSmartMode(string modelName, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var messages = _contextService.GetMessages();
-        var lastUserMessage = messages.LastOrDefault(m => m.Role == SpeakerRole.Me);
+        yield return "Smart Mode: Active. Waiting for Companion's question...";
 
-        if (lastUserMessage != null && (DateTime.UtcNow - lastUserMessage.Timestamp).TotalMinutes < 10)
+        while (!cancellationToken.IsCancellationRequested)
         {
-            try
+            var question = _audioService.GetAndClearCompleteQuestion();
+
+            if (!string.IsNullOrWhiteSpace(question))
             {
-                var response = await _orchestrator.ProcessRequestAsync(modelName, lastUserMessage.Text);
-                await Clients.Caller.SendAsync("ReceiveResponse", response);
+                yield return $"[System] Question detected: \"{question}\"";
+
+                await foreach (var chunk in _orchestrator.StreamRequestAsync(modelName, question).WithCancellation(cancellationToken))
+                {
+                    yield return chunk;
+                }
+
+                yield return "[System] Response complete.";
             }
-            catch (Exception ex)
-            {
-                await Clients.Caller.SendAsync("ReceiveError", ex.Message);
-            }
-        }
-        else
-        {
-            await Clients.Caller.SendAsync("ReceiveStatus", "Smart Mode: Active (No recent question found)");
+
+            await Task.Delay(100, cancellationToken);
         }
     }
 }

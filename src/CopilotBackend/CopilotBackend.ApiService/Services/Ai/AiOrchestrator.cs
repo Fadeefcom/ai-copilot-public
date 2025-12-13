@@ -1,5 +1,4 @@
 ﻿using CopilotBackend.ApiService.Abstractions;
-using Deepgram.Models.Agent.v2.WebSocket;
 
 namespace CopilotBackend.ApiService.Services.Ai;
 
@@ -36,36 +35,70 @@ public class AiOrchestrator
         return await provider.GenerateResponseAsync(messages);
     }
 
-    public IAsyncEnumerable<string> StreamRequestAsync(string modelName, string prompt)
+    public async IAsyncEnumerable<string> StreamRequestAsync(string modelName, string prompt)
     {
         if (!_audioService.IsRunning)
-            return new List<string> { "Audio capture is not running." }.ToAsyncEnumerable();
+        {
+            yield return "Audio capture is not running.";
+            yield break;
+        }
 
         var provider = _providers.FirstOrDefault(p => p.ProviderName == modelName);
         if (provider == null)
         {
-            return new List<string> { $"Error: LLM Provider '{modelName}' not found." }.ToAsyncEnumerable();
+            yield return $"Error: LLM Provider '{modelName}' not found.";
+            yield break;
         }
 
+        var systemPrompt = await _promptManager.GetSystemPrompt();
 
-        var systemPrompt = _promptManager.GetSystemPrompt();
         var messages = new List<ChatMessage>
         {
-            new(SpeakerRole.System.ToString(), systemPrompt) { },
-            new(SpeakerRole.Me.ToString(), prompt) { }
+            new(SpeakerRole.System.ToString(), systemPrompt),
+            new(SpeakerRole.Me.ToString(), prompt)
         };
 
-        return provider.StreamResponseAsync(messages);
-    }    
-}
-
-public static class AsyncEnumerableExtensions
-{
-    public static async IAsyncEnumerable<T> ToAsyncEnumerable<T>(this IEnumerable<T> source)
-    {
-        foreach (var item in source)
+        await foreach (var chunk in provider.StreamResponseAsync(messages))
         {
-            yield return item;
+            yield return chunk;
+        }
+    }
+
+    public async Task<string?> DetectQuestionAsync(string modelName, string transcript)
+    {
+        if (string.IsNullOrWhiteSpace(transcript) || transcript.Length < 10)
+            return null;
+
+        var provider = _providers.FirstOrDefault(p => p.ProviderName == modelName);
+        if (provider == null)
+            return $"Error: LLM Provider '{modelName}' not found.";
+
+        var systemPrompt =
+            "You are a semantic detector. Your task is to analyze the user's speech buffer. " +
+            "Check if it contains a COMPLETE, addressed question that requires an answer. " +
+            "If a distinct question is present, extract and output ONLY the question text. " +
+            "If the text is incomplete, just conversational filler, or does not contain a question, output 'NO'.";
+
+        var messages = new List<ChatMessage>
+        {
+            new(SpeakerRole.System.ToString(), systemPrompt),
+            new(SpeakerRole.Me.ToString(), transcript)
+        };
+
+        try
+        {
+            var response = await provider.GenerateResponseAsync(messages);
+
+            if (string.IsNullOrWhiteSpace(response) || response.Contains("NO", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            return response.Trim();
+        }
+        catch
+        {
+            return null;
         }
     }
 }
