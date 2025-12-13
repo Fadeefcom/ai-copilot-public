@@ -1,101 +1,147 @@
-﻿using System.Net.Http.Headers;
-using System.Text;
-using System.Text.Json;
-using CopilotBackend.ApiService.Abstractions;
+﻿using CopilotBackend.ApiService.Abstractions;
 using CopilotBackend.ApiService.Configuration;
 using Microsoft.Extensions.Options;
+using System.Runtime.CompilerServices;
+using System.Text.Json.Nodes;
 
 namespace CopilotBackend.ApiService.Services.Ai.Providers;
 
 public class OpenAiProvider : ILlmProvider
 {
-    private readonly HttpClient _httpClient;
+    private readonly IOpenAiApi _api;
+    private readonly ILogger<OpenAiProvider> _logger;
     private readonly string _apiKey;
 
-    public OpenAiProvider(HttpClient httpClient, IOptions<AiOptions> options)
+    public OpenAiProvider(
+        IOpenAiApi api,
+        ILogger<OpenAiProvider> logger,
+        IOptions<AiOptions> options)
     {
-        _httpClient = httpClient;
-        _apiKey = options.Value.OpenAiApiKey;
+        _api = api;
+        _logger = logger;
+        _apiKey = $"Bearer {options.Value.OpenAiApiKey}";
     }
 
-    public string ProviderName => "OpenAI GPT-5";
+    public string ProviderName => "OpenAI";
 
-    public async Task<string> GenerateResponseAsync(IEnumerable<ChatMessage> messages, CancellationToken ct = default)
+    public async Task<string> GenerateResponseAsync(
+        IEnumerable<ChatMessage> messages,
+        string model,
+        CancellationToken ct = default)
     {
-        var request = new
+        var modelToUse = model;
+
+        _logger.LogInformation("Generating response using model: {Model}", modelToUse);
+
+        var request = new JsonObject
         {
-            model = "gpt-5-nano",
-            messages = messages.Select(m => new { role = m.Role, content = m.Content }),
-            temperature = 0.4,
-            top_p = 0.95
+            ["model"] = modelToUse,
+            ["messages"] = new JsonArray(messages.Select(m => new JsonObject
+            {
+                ["role"] = m.Role,
+                ["content"] = m.Content
+            }).ToArray()),
+            ["temperature"] = 0.4,
+            ["top_p"] = 0.95
         };
 
-        using var httpReq = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions")
+        try
         {
-            Content = new StringContent(JsonSerializer.Serialize(request), Encoding.UTF8, "application/json")
-        };
-        httpReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+            var response = await _api.ChatCompletionAsync(request, _apiKey);
+            var content = response?["choices"]?[0]?["message"]?["content"]?.GetValue<string>();
 
-        var response = await _httpClient.SendAsync(httpReq, ct);
-        response.EnsureSuccessStatusCode();
+            if (string.IsNullOrEmpty(content))
+            {
+                _logger.LogWarning("Received empty content from OpenAI model: {Model}", modelToUse);
+                return string.Empty;
+            }
 
-        var json = await response.Content.ReadAsStringAsync(ct);
-        using var doc = JsonDocument.Parse(json);
-        return doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "";
+            _logger.LogInformation("Successfully generated response. Length: {Length}", content.Length);
+            return content;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error generating response from OpenAI model: {Model}", modelToUse);
+            throw;
+        }
     }
 
-    public async IAsyncEnumerable<string> StreamResponseAsync(IReadOnlyList<ChatMessage> context)
+    public async IAsyncEnumerable<string> StreamResponseAsync(
+        IReadOnlyList<ChatMessage> context,
+        string model,
+        [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var request = new
+        var modelToUse = model;
+
+        _logger.LogInformation("Starting stream using model: {Model}", modelToUse);
+
+        var request = new JsonObject
         {
-            model = "gpt-5-nano",
-            messages = context.Select(m => new { role = m.Role, content = m.Content }),
-            stream = true,
-            temperature = 0.4,
-            top_p = 0.95
+            ["model"] = modelToUse,
+            ["messages"] = new JsonArray(context.Select(m => new JsonObject
+            {
+                ["role"] = m.Role,
+                ["content"] = m.Content
+            }).ToArray()),
+            ["stream"] = true,
+            ["temperature"] = 0.4,
+            ["top_p"] = 0.95
         };
 
-        using var httpReq = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions")
+        HttpResponseMessage? responseMessage = null;
+
+        try
         {
-            Content = new StringContent(JsonSerializer.Serialize(request), Encoding.UTF8, "application/json")
-        };
+            responseMessage = await _api.ChatStreamAsync(request, _apiKey);
+            responseMessage.EnsureSuccessStatusCode();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to initiate stream with OpenAI model: {Model}", modelToUse);
+            throw;
+        }
 
-        httpReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
-        httpReq.Headers.Accept.ParseAdd("text/event-stream");
-
-        using var response = await _httpClient.SendAsync(httpReq, HttpCompletionOption.ResponseHeadersRead);
-        response.EnsureSuccessStatusCode();
-
-        using var stream = await response.Content.ReadAsStreamAsync();
+        using var stream = await responseMessage.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);
 
         while (!reader.EndOfStream)
         {
-            var line = await reader.ReadLineAsync();
+            string? line = null;
+
+            try
+            {
+                line = await reader.ReadLineAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error reading stream line");
+                throw;
+            }
 
             if (string.IsNullOrWhiteSpace(line)) continue;
+            if (!line.StartsWith("data: ")) continue;
 
-            if (line.StartsWith("data: "))
+            if (line.AsSpan(6).SequenceEqual("[DONE]"))
             {
-                var data = line["data: ".Length..];
+                _logger.LogInformation("Stream finished for model: {Model}", modelToUse);
+                yield break;
+            }
 
-                if (data == "[DONE]") yield break;
+            string? content = null;
 
-                using var doc = JsonDocument.Parse(data);
-                var root = doc.RootElement;
+            try
+            {
+                var jsonNode = JsonNode.Parse(line[6..]);
+                content = jsonNode?["choices"]?[0]?["delta"]?["content"]?.GetValue<string>();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error parsing stream chunk");
+            }
 
-                if (root.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
-                {
-                    var delta = choices[0].GetProperty("delta");
-                    if (delta.TryGetProperty("content", out var contentElement))
-                    {
-                        var content = contentElement.GetString();
-                        if (!string.IsNullOrEmpty(content))
-                        {
-                            yield return content;
-                        }
-                    }
-                }
+            if (!string.IsNullOrEmpty(content))
+            {
+                yield return content;
             }
         }
     }

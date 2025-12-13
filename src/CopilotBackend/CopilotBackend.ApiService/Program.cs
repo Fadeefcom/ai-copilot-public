@@ -55,6 +55,20 @@ public class Program
         builder.Services.AddTransient<ILlmProvider, OpenAiProvider>();
         builder.Services.AddTransient<ILlmProvider, GrokProvider>();
 
+        builder.Services.AddRefitClient<IGrokApi>()
+            .ConfigureHttpClient(c =>
+            {
+                c.BaseAddress = new Uri("https://api.x.ai/v1");
+                c.Timeout = TimeSpan.FromMinutes(5);
+            });
+
+        builder.Services.AddRefitClient<IOpenAiApi>()
+            .ConfigureHttpClient(c =>
+            {
+                c.BaseAddress = new Uri("https://api.openai.com/v1");
+                c.Timeout = TimeSpan.FromMinutes(1);
+            });
+
         var app = builder.Build();
 
         app.Urls.Clear();

@@ -28,11 +28,14 @@ public class AiOrchestrator
 
         await _contextManager.CheckAndArchiveContextAsync();
 
-        var provider = _providers.FirstOrDefault(p => p.ProviderName == modelName);
-        if (provider == null) throw new ArgumentException($"Model '{modelName}' not found.");
+        var name = modelName.Split('_')[0];
+        var version = modelName.Split("_")[1];
+
+        var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
+        if (provider == null) throw new ArgumentException($"Model '{name}' not found.");
 
         var messages = await _promptManager.BuildRequestMessagesAsync(instruction);
-        return await provider.GenerateResponseAsync(messages);
+        return await provider.GenerateResponseAsync(messages, version);
     }
 
     public async IAsyncEnumerable<string> StreamRequestAsync(string modelName, string prompt)

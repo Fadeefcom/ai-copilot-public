@@ -1,130 +1,169 @@
-﻿using System.Net.Http.Headers;
-using System.Text;
-using System.Text.Json;
-using CopilotBackend.ApiService.Abstractions;
+﻿using CopilotBackend.ApiService.Abstractions;
 using CopilotBackend.ApiService.Configuration;
 using Microsoft.Extensions.Options;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace CopilotBackend.ApiService.Services.Ai.Providers;
 
 public class GrokProvider : ILlmProvider
 {
-    private readonly HttpClient _httpClient;
+    private readonly IGrokApi _api;
+    private readonly ILogger<GrokProvider> _logger;
     private readonly string _apiKey;
+    private readonly string _defaultModel;
 
-    public string ProviderName => "Grok (grok-4)";
-
-    public GrokProvider(HttpClient httpClient, IOptions<AiOptions> options)
+    public GrokProvider(
+        IGrokApi api,
+        ILogger<GrokProvider> logger,
+        IOptions<AiOptions> options)
     {
-        _httpClient = httpClient;
-        _apiKey = options.Value.GroqApiKey;
+        _api = api;
+        _logger = logger;
+        _apiKey = $"Bearer {options.Value.GroqApiKey}";
+        _defaultModel = "grok-beta";
     }
 
-    public async Task<string> GenerateResponseAsync(IEnumerable<ChatMessage> messages, CancellationToken ct = default)
+    public string ProviderName => "Grok (xAI)";
+
+    public async Task<string> GenerateResponseAsync(
+        IEnumerable<ChatMessage> messages,
+        string? overrideModel = null,
+        CancellationToken ct = default)
     {
-        var request = new
+        var modelToUse = overrideModel ?? _defaultModel;
+
+        _logger.LogInformation("Generating response using Grok model: {Model}", modelToUse);
+
+        var request = new JsonObject
         {
-            model = "grok-4-latest",
-            messages = messages.Select(m => new { role = m.Role, content = m.Content })
+            ["model"] = modelToUse,
+            ["messages"] = new JsonArray(messages.Select(m => new JsonObject
+            {
+                ["role"] = m.Role,
+                ["content"] = m.Content
+            }).ToArray()),
+            ["temperature"] = 0.4,
+            ["stream"] = false
         };
 
-        using var httpReq = new HttpRequestMessage(HttpMethod.Post, "https://api.x.ai/v1/chat/completions")
+        try
         {
-            Content = new StringContent(JsonSerializer.Serialize(request), Encoding.UTF8, "application/json")
-        };
-
-        httpReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
-        httpReq.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-        var response = await _httpClient.SendAsync(httpReq, ct);
-        response.EnsureSuccessStatusCode();
-
-        var json = await response.Content.ReadAsStringAsync(ct);
-
-        return ParseXAiResponse(json);
+            var response = await _api.ChatCompletionAsync(request, _apiKey);
+            return ParseGrokResponse(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error generating response from Grok model: {Model}", modelToUse);
+            throw;
+        }
     }
 
-    public async IAsyncEnumerable<string> StreamResponseAsync(IReadOnlyList<ChatMessage> context)
+    public async IAsyncEnumerable<string> StreamResponseAsync(
+        IReadOnlyList<ChatMessage> context,
+        string? overrideModel = null,
+        [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var request = new
+        var modelToUse = overrideModel ?? _defaultModel;
+
+        _logger.LogInformation("Starting stream using Grok model: {Model}", modelToUse);
+
+        var request = new JsonObject
         {
-            model = "grok-4-latest",
-            messages = context.Select(m => new { role = m.Role, content = m.Content }),
-            stream = true
+            ["model"] = modelToUse,
+            ["messages"] = new JsonArray(context.Select(m => new JsonObject
+            {
+                ["role"] = m.Role,
+                ["content"] = m.Content
+            }).ToArray()),
+            ["stream"] = true,
+            ["temperature"] = 0.4
         };
 
-        using var httpReq = new HttpRequestMessage(HttpMethod.Post, "https://api.x.ai/v1/chat/completions")
+        HttpResponseMessage? responseMessage = null;
+
+        try
         {
-            Content = new StringContent(JsonSerializer.Serialize(request), Encoding.UTF8, "application/json")
-        };
+            responseMessage = await _api.ChatStreamAsync(request, _apiKey);
+            responseMessage.EnsureSuccessStatusCode();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to initiate stream with Grok model: {Model}", modelToUse);
+            throw;
+        }
 
-        httpReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
-        httpReq.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-        using var response = await _httpClient.SendAsync(httpReq, HttpCompletionOption.ResponseHeadersRead);
-        response.EnsureSuccessStatusCode();
-
-        using var stream = await response.Content.ReadAsStreamAsync();
+        using var stream = await responseMessage.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);
 
         while (!reader.EndOfStream)
         {
-            var line = await reader.ReadLineAsync();
-            if (string.IsNullOrWhiteSpace(line)) continue;
-            if (line.StartsWith("data: [DONE]")) break;
-
-            if (line.StartsWith("data: "))
+            string? line = null;
+            try
             {
-                var json = line.Substring(6);
-                string? content = null;
-                try
-                {
-                    using var doc = JsonDocument.Parse(json);
-                    var choices = doc.RootElement.GetProperty("choices");
-                    if (choices.GetArrayLength() > 0)
-                    {
-                        var delta = choices[0].GetProperty("delta");
-                        if (delta.TryGetProperty("content", out var contentProp))
-                        {
-                            content = contentProp.GetString();
-                        }
-                    }
-                }
-                catch { }
+                line = await reader.ReadLineAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error reading stream line");
+                throw;
+            }
 
-                if (!string.IsNullOrEmpty(content))
-                {
-                    yield return content;
-                }
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            if (!line.StartsWith("data: ")) continue;
+
+            if (line.AsSpan(6).SequenceEqual("[DONE]"))
+            {
+                _logger.LogInformation("Stream finished for Grok model: {Model}", modelToUse);
+                yield break;
+            }
+
+            string? content = null;
+            try
+            {
+                var jsonNode = JsonNode.Parse(line[6..]);
+                content = jsonNode?["choices"]?[0]?["delta"]?["content"]?.GetValue<string>();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error parsing stream chunk");
+            }
+
+            if (!string.IsNullOrEmpty(content))
+            {
+                yield return content;
             }
         }
     }
 
-    private string ParseXAiResponse(string json)
+    private string ParseGrokResponse(JsonObject? response)
     {
-        using var doc = JsonDocument.Parse(json);
-        if (doc.RootElement.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
+        if (response == null) return string.Empty;
+
+        var message = response["choices"]?[0]?["message"];
+        if (message == null) return string.Empty;
+
+        var contentNode = message["content"];
+        if (contentNode == null) return string.Empty;
+
+        if (contentNode.GetValueKind() == JsonValueKind.String)
         {
-            var firstChoice = choices[0];
-            if (firstChoice.TryGetProperty("message", out var messageElement))
+            return contentNode.GetValue<string>();
+        }
+
+        if (contentNode.GetValueKind() == JsonValueKind.Array)
+        {
+            var array = contentNode.AsArray();
+            if (array.Count > 0)
             {
-                if (messageElement.TryGetProperty("content", out var contentElement))
-                {
-                    if (contentElement.ValueKind == JsonValueKind.Array && contentElement.GetArrayLength() > 0)
-                    {
-                        var firstBlock = contentElement[0];
-                        if (firstBlock.TryGetProperty("text", out var textProp))
-                            return textProp.GetString() ?? "";
-                        if (firstBlock.TryGetProperty("content", out var altProp))
-                            return altProp.GetString() ?? "";
-                    }
-                    else if (contentElement.ValueKind == JsonValueKind.String)
-                    {
-                        return contentElement.GetString() ?? "";
-                    }
-                }
+                var firstBlock = array[0];
+                return firstBlock?["text"]?.GetValue<string>()
+                    ?? firstBlock?["content"]?.GetValue<string>()
+                    ?? string.Empty;
             }
         }
-        return "";
+
+        return string.Empty;
     }
 }

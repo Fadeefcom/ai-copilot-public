@@ -51,7 +51,7 @@ UI_TEXTS = {
     }
 }
 
-MODELS = ["Grok (grok-4)", "OpenAI GPT-4.1", "OpenAI GPT-5"]
+MODELS = ["Grok grok-4", "OpenAI gpt-4.1-mini", "OpenAI gpt-5-nano"]
 
 class SignalRWorker(QThread):
     chunk_received = pyqtSignal(str)
