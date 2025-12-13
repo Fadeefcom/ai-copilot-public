@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QTime
 from PyQt6.QtGui import QFont, QKeyEvent
 
+import logging
 from signalrcore.hub_connection_builder import HubConnectionBuilder
 
 load_dotenv()
@@ -64,22 +65,50 @@ class SignalRWorker(QThread):
 
     def run(self):
         try:
+            hub_url = HUB_URL
+            # Ensure we use WebSocket protocol
+            if hub_url.startswith("http"):
+                hub_url = hub_url.replace("http", "ws", 1)
+
             self.connection = HubConnectionBuilder()\
-                .with_url(HUB_URL)\
+                .with_url(hub_url, options={
+                    "skip_negotiation": True,
+                    "transport": "webSockets"
+                })\
+                .with_automatic_reconnect({
+                    "type": "raw",
+                    "keep_alive_interval": 10,
+                    "reconnect_interval": 5,
+                    "max_attempts": 5
+                })\
                 .build()
 
-            self.connection.on_open(lambda: self.status_received.emit("System: Smart Mode Connected."))
+            # 1. DEFINE THE STREAMING LOGIC AS A SEPARATE FUNCTION
+            def start_streaming():
+                self.status_received.emit("System: Smart Mode Connected.")
+                print(f"DEBUG: Connection Open. Starting stream with: {self.model_name}")
+                
+                try:
+                    self.connection.stream("StreamSmartMode", [str(self.model_name)])\
+                        .subscribe({
+                            "next": self.handle_stream_item,
+                            "complete": lambda: self.status_received.emit("System: Stream session ended."),
+                            "error": lambda x: self.status_received.emit(f"System Error: {x}")
+                        })
+                except Exception as stream_err:
+                    self.status_received.emit(f"Stream Start Error: {stream_err}")
+
+            # 2. ATTACH IT TO ON_OPEN
+            # The library calls this ONLY when the socket is truly ready
+            self.connection.on_open(start_streaming)
+            
             self.connection.on_close(lambda: self.status_received.emit("System: Smart Mode Disconnected."))
             
+            # 3. START THE CONNECTION
+            print("DEBUG: Starting connection...")
             self.connection.start()
-            
-            self.connection.stream("StreamSmartMode", [self.model_name])\
-                .subscribe({
-                    "next": self.handle_stream_item,
-                    "complete": lambda: self.status_received.emit("System: Stream session ended."),
-                    "error": lambda x: self.status_received.emit(f"System Error: {x}")
-                })
 
+            # Keep thread alive
             while self.connection and self.is_running:
                 self.msleep(100)
 

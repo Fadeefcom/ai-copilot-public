@@ -8,15 +8,19 @@ public class SmartHub : Hub
 {
     private readonly AiOrchestrator _orchestrator;
     private readonly DeepgramAudioService _audioService;
+    private readonly ILogger<SmartHub> _logger;
 
-    public SmartHub(AiOrchestrator orchestrator, DeepgramAudioService audioService)
+    public SmartHub(AiOrchestrator orchestrator, DeepgramAudioService audioService, ILogger<SmartHub> logger)
     {
         _orchestrator = orchestrator;
         _audioService = audioService;
+        _logger = logger;
     }
 
     public async IAsyncEnumerable<string> StreamSmartMode(string modelName, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        _logger.LogInformation($"[Server] StreamSmartMode called with model: '{modelName}'");
+
         yield return "Smart Mode: Active. Waiting for Companion's question...";
 
         while (!cancellationToken.IsCancellationRequested)

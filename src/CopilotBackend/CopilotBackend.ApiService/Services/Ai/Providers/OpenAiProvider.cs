@@ -18,13 +18,13 @@ public class OpenAiProvider : ILlmProvider
         _apiKey = options.Value.OpenAiApiKey;
     }
 
-    public string ProviderName => "OpenAI GPT-4.1 Mini";
+    public string ProviderName => "OpenAI GPT-5 Nano";
 
     public async Task<string> GenerateResponseAsync(IEnumerable<ChatMessage> messages, CancellationToken ct = default)
     {
         var request = new
         {
-            model = "gpt-4.1-mini",
+            model = "gpt-5-nano",
             messages = messages.Select(m => new { role = m.Role, content = m.Content }),
             temperature = 0.4,
             top_p = 0.95
@@ -48,17 +48,20 @@ public class OpenAiProvider : ILlmProvider
     {
         var request = new
         {
-            model = "gpt-4.1-mini",
+            model = "gpt-5-nano",
             messages = context.Select(m => new { role = m.Role, content = m.Content }),
+            stream = true,
             temperature = 0.4,
-            stream = true
+            top_p = 0.95
         };
 
         using var httpReq = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions")
         {
             Content = new StringContent(JsonSerializer.Serialize(request), Encoding.UTF8, "application/json")
         };
+
         httpReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+        httpReq.Headers.Accept.ParseAdd("text/event-stream");
 
         using var response = await _httpClient.SendAsync(httpReq, HttpCompletionOption.ResponseHeadersRead);
         response.EnsureSuccessStatusCode();
@@ -69,31 +72,29 @@ public class OpenAiProvider : ILlmProvider
         while (!reader.EndOfStream)
         {
             var line = await reader.ReadLineAsync();
+
             if (string.IsNullOrWhiteSpace(line)) continue;
-            if (line.StartsWith("data: [DONE]")) break;
 
             if (line.StartsWith("data: "))
             {
-                var json = line.Substring(6);
-                string? content = null;
-                try
+                var data = line["data: ".Length..];
+
+                if (data == "[DONE]") yield break;
+
+                using var doc = JsonDocument.Parse(data);
+                var root = doc.RootElement;
+
+                if (root.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
                 {
-                    using var doc = JsonDocument.Parse(json);
-                    var choices = doc.RootElement.GetProperty("choices");
-                    if (choices.GetArrayLength() > 0)
+                    var delta = choices[0].GetProperty("delta");
+                    if (delta.TryGetProperty("content", out var contentElement))
                     {
-                        var delta = choices[0].GetProperty("delta");
-                        if (delta.TryGetProperty("content", out var contentProp))
+                        var content = contentElement.GetString();
+                        if (!string.IsNullOrEmpty(content))
                         {
-                            content = contentProp.GetString();
+                            yield return content;
                         }
                     }
-                }
-                catch { /* ignore parsing errors */ }
-
-                if (!string.IsNullOrEmpty(content))
-                {
-                    yield return content;
                 }
             }
         }
