@@ -18,7 +18,7 @@ public class OpenAiProvider : ILlmProvider
         _apiKey = options.Value.OpenAiApiKey;
     }
 
-    public string ProviderName => "OpenAI GPT-5 Nano";
+    public string ProviderName => "OpenAI GPT-5";
 
     public async Task<string> GenerateResponseAsync(IEnumerable<ChatMessage> messages, CancellationToken ct = default)
     {
