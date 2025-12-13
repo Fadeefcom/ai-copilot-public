@@ -38,7 +38,7 @@ public class OpenAiProvider : ILlmProvider
             ["model"] = modelToUse,
             ["messages"] = new JsonArray(messages.Select(m => new JsonObject
             {
-                ["role"] = m.Role,
+                ["role"] = m.Role.ToString().ToLowerInvariant(),
                 ["content"] = m.Content
             }).ToArray()),
             ["temperature"] = 0.4,
@@ -80,7 +80,7 @@ public class OpenAiProvider : ILlmProvider
             ["model"] = modelToUse,
             ["messages"] = new JsonArray(context.Select(m => new JsonObject
             {
-                ["role"] = m.Role,
+                ["role"] = m.Role.ToString().ToLowerInvariant(),
                 ["content"] = m.Content
             }).ToArray()),
             ["stream"] = true,
@@ -121,7 +121,9 @@ public class OpenAiProvider : ILlmProvider
             if (string.IsNullOrWhiteSpace(line)) continue;
             if (!line.StartsWith("data: ")) continue;
 
-            if (line.AsSpan(6).SequenceEqual("[DONE]"))
+            var data = line.AsSpan(6);
+
+            if (data.SequenceEqual("[DONE]"))
             {
                 _logger.LogInformation("Stream finished for model: {Model}", modelToUse);
                 yield break;
@@ -131,7 +133,7 @@ public class OpenAiProvider : ILlmProvider
 
             try
             {
-                var jsonNode = JsonNode.Parse(line[6..]);
+                var jsonNode = JsonNode.Parse(data.ToString());
                 content = jsonNode?["choices"]?[0]?["delta"]?["content"]?.GetValue<string>();
             }
             catch (Exception ex)

@@ -9,6 +9,5 @@ public interface IOpenAiApi
     Task<JsonObject> ChatCompletionAsync([Body] JsonObject request, [Header("Authorization")] string authorization);
 
     [Post("/chat/completions")]
-    [Headers("Accept: text/event-stream")]
     Task<HttpResponseMessage> ChatStreamAsync([Body] JsonObject request, [Header("Authorization")] string authorization);
 }

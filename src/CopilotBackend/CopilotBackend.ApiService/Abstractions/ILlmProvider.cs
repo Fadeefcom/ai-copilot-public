@@ -1,4 +1,5 @@
-﻿using System.Runtime.CompilerServices;
+﻿using CopilotBackend.ApiService.Services;
+using System.Runtime.CompilerServices;
 
 namespace CopilotBackend.ApiService.Abstractions;
 
@@ -10,4 +11,4 @@ public interface ILlmProvider
     IAsyncEnumerable<string> StreamResponseAsync(IReadOnlyList<ChatMessage> context, string model, CancellationToken ct = default);
 }
 
-public record ChatMessage(string Role, string Content);
+public record ChatMessage(ChatRole Role, string Content);

@@ -41,7 +41,7 @@ public class GrokProvider : ILlmProvider
             ["model"] = modelToUse,
             ["messages"] = new JsonArray(messages.Select(m => new JsonObject
             {
-                ["role"] = m.Role,
+                ["role"] = m.Role.ToString().ToLowerInvariant(),
                 ["content"] = m.Content
             }).ToArray()),
             ["temperature"] = 0.4,
@@ -74,7 +74,7 @@ public class GrokProvider : ILlmProvider
             ["model"] = modelToUse,
             ["messages"] = new JsonArray(context.Select(m => new JsonObject
             {
-                ["role"] = m.Role,
+                ["role"] = m.Role.ToString().ToLowerInvariant(),
                 ["content"] = m.Content
             }).ToArray()),
             ["stream"] = true,

@@ -6,6 +6,7 @@ using CopilotBackend.ApiService.Services.Ai;
 using CopilotBackend.ApiService.Services.Ai.Providers;
 using CopilotBackend.ApiService.Services.Hubs;
 using Microsoft.AspNetCore.Mvc.Abstractions;
+using Refit;
 using System.Text;
 
 namespace CopilotBackend.ApiService;

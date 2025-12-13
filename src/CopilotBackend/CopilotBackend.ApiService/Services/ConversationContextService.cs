@@ -2,6 +2,13 @@
 
 namespace CopilotBackend.ApiService.Services;
 
+public enum ChatRole
+{
+    System,
+    User,
+    Assistant
+}
+
 public enum SpeakerRole
 {
     Me,

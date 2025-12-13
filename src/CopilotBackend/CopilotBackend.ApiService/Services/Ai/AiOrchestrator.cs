@@ -28,11 +28,11 @@ public class AiOrchestrator
 
         await _contextManager.CheckAndArchiveContextAsync();
 
-        var name = modelName.Split('_')[0];
-        var version = modelName.Split("_")[1];
+        var name = modelName.Split(' ')[0];
+        var version = modelName.Split(' ')[1];
 
         var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
-        if (provider == null) throw new ArgumentException($"Model '{name}' not found.");
+        if (provider == null) throw new ArgumentException($"Model '{modelName}' not found.");
 
         var messages = await _promptManager.BuildRequestMessagesAsync(instruction);
         return await provider.GenerateResponseAsync(messages, version);
@@ -46,7 +46,10 @@ public class AiOrchestrator
             yield break;
         }
 
-        var provider = _providers.FirstOrDefault(p => p.ProviderName == modelName);
+        var name = modelName.Split(' ')[0];
+        var version = modelName.Split(' ')[1];
+
+        var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
         if (provider == null)
         {
             yield return $"Error: LLM Provider '{modelName}' not found.";
@@ -57,11 +60,11 @@ public class AiOrchestrator
 
         var messages = new List<ChatMessage>
         {
-            new(SpeakerRole.System.ToString(), systemPrompt),
-            new(SpeakerRole.Me.ToString(), prompt)
+            new(ChatRole.System, systemPrompt),
+            new(ChatRole.User, prompt)
         };
 
-        await foreach (var chunk in provider.StreamResponseAsync(messages))
+        await foreach (var chunk in provider.StreamResponseAsync(messages, version))
         {
             yield return chunk;
         }
@@ -72,7 +75,10 @@ public class AiOrchestrator
         if (string.IsNullOrWhiteSpace(transcript) || transcript.Length < 10)
             return null;
 
-        var provider = _providers.FirstOrDefault(p => p.ProviderName == modelName);
+        var name = modelName.Split(' ')[0];
+        var version = modelName.Split(' ')[1];
+
+        var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
         if (provider == null)
             return $"Error: LLM Provider '{modelName}' not found.";
 
@@ -84,13 +90,13 @@ public class AiOrchestrator
 
         var messages = new List<ChatMessage>
         {
-            new(SpeakerRole.System.ToString(), systemPrompt),
-            new(SpeakerRole.Me.ToString(), transcript)
+            new(ChatRole.System, systemPrompt),
+            new(ChatRole.User, transcript)
         };
 
         try
         {
-            var response = await provider.GenerateResponseAsync(messages);
+            var response = await provider.GenerateResponseAsync(messages, version);
 
             if (string.IsNullOrWhiteSpace(response) || response.Contains("NO", StringComparison.OrdinalIgnoreCase))
             {

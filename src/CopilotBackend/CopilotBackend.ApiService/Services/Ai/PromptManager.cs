@@ -39,8 +39,8 @@ public class PromptManager
 
         return new List<ChatMessage>
         {
-            new("system", fullSystemMessage),
-            new("user", fullUserMessage)
+            new(ChatRole.System, fullSystemMessage),
+            new(ChatRole.User, fullUserMessage)
         };
     }
 
