@@ -1,5 +1,4 @@
 ﻿using CopilotBackend.ApiService.Abstractions;
-using Microsoft.AspNetCore.Mvc.ModelBinding;
 using System.Text;
 using System.Text.Json;
 

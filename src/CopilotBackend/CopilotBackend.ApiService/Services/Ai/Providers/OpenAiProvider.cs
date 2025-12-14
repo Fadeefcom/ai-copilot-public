@@ -33,13 +33,14 @@ public class OpenAiProvider : ILlmProvider
     public async Task<string> GenerateResponseAsync(
         IEnumerable<ChatMessage> messages,
         string model,
+        string? base64Image = null,
         CancellationToken ct = default)
     {
         var modelToUse = model;
 
         _logger.LogInformation("Generating response using model: {Model}", modelToUse);
 
-        var request = CreateBaseRequest(messages, modelToUse);
+        var request = CreateBaseRequest(messages, model, base64Image);
 
         try
         {
@@ -65,13 +66,14 @@ public class OpenAiProvider : ILlmProvider
     public async IAsyncEnumerable<string> StreamResponseAsync(
         IReadOnlyList<ChatMessage> context,
         string model,
+        string? base64Image = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var modelToUse = model;
 
         _logger.LogInformation("Starting stream using model: {Model}", modelToUse);
 
-        var request = CreateBaseRequest(context, modelToUse);
+        var request = CreateBaseRequest(context, model, base64Image);
         request["stream"] = true;
 
         HttpResponseMessage? responseMessage = null;
@@ -134,21 +136,47 @@ public class OpenAiProvider : ILlmProvider
         }
     }
 
-    private JsonObject CreateBaseRequest(IEnumerable<ChatMessage> messages, string model)
+    private JsonObject CreateBaseRequest(IEnumerable<ChatMessage> messages, string model, string? base64Image)
     {
+        var msgArray = new JsonArray();
+
+        foreach (var m in messages)
+        {
+            if (m.Role == ChatRole.User && !string.IsNullOrEmpty(base64Image) && m == messages.Last())
+            {
+                msgArray.Add(new JsonObject
+                {
+                    ["role"] = "user",
+                    ["content"] = new JsonArray
+                    {
+                        new JsonObject { ["type"] = "text", ["text"] = m.Content },
+                        new JsonObject
+                        {
+                            ["type"] = "image_url",
+                            ["image_url"] = new JsonObject { ["url"] = $"data:image/jpeg;base64,{base64Image}" }
+                        }
+                    }
+                });
+            }
+            else
+            {
+                msgArray.Add(new JsonObject
+                {
+                    ["role"] = m.Role.ToString().ToLowerInvariant(),
+                    ["content"] = m.Content
+                });
+            }
+        }
+
         var request = new JsonObject
         {
             ["model"] = model,
-            ["messages"] = new JsonArray(messages.Select(m => new JsonObject
-            {
-                ["role"] = m.Role.ToString().ToLowerInvariant(),
-                ["content"] = m.Content
-            }).ToArray())
+            ["messages"] = msgArray
         };
 
         if (!IsFixedParameterModel(model))
         {
-            request["temperature"] = 0.4;
+            request["temperature"] = 0.3;
             request["top_p"] = 0.95;
         }
 

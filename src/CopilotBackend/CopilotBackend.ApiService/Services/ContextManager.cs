@@ -45,6 +45,11 @@ public class ContextManager
         }
     }
 
+    public IEnumerable<ConversationMessage> GetMessages()
+    {
+        return _contextService.GetMessages();
+    }
+
     private static string BuildTranscript(List<ConversationMessage> messages)
     {
         var sb = new StringBuilder();

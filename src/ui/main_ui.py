@@ -4,6 +4,10 @@ import requests
 import ctypes
 import re
 from dotenv import load_dotenv
+from PIL import ImageGrab
+import io
+import base64
+import threading
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QTextEdit, QLabel, QScrollArea, QFrame, 
@@ -65,55 +69,53 @@ class SignalRWorker(QThread):
 
     def run(self):
         try:
-            hub_url = HUB_URL
-            # Ensure we use WebSocket protocol
-            if hub_url.startswith("http"):
-                hub_url = hub_url.replace("http", "ws", 1)
+            hub_url = HUB_URL.replace("http", "ws", 1) if HUB_URL.startswith("http") else HUB_URL
 
             self.connection = HubConnectionBuilder()\
-                .with_url(hub_url, options={
-                    "skip_negotiation": True,
-                    "transport": "webSockets"
-                })\
+                .with_url(hub_url, options={"skip_negotiation": True, "transport": "webSockets"})\
                 .with_automatic_reconnect({
-                    "type": "raw",
-                    "keep_alive_interval": 10,
-                    "reconnect_interval": 5,
-                    "max_attempts": 5
-                })\
-                .build()
+                    "type": "raw", "keep_alive_interval": 10, "reconnect_interval": 5, "max_attempts": 5
+                }).build()
 
-            # 1. DEFINE THE STREAMING LOGIC AS A SEPARATE FUNCTION
-            def start_streaming():
+            def start_activities():
                 self.status_received.emit("System: Smart Mode Connected.")
-                print(f"DEBUG: Connection Open. Starting stream with: {self.model_name}")
                 
-                try:
-                    self.connection.stream("StreamSmartMode", [str(self.model_name)])\
-                        .subscribe({
-                            "next": self.handle_stream_item,
-                            "complete": lambda: self.status_received.emit("System: Stream session ended."),
-                            "error": lambda x: self.status_received.emit(f"System Error: {x}")
-                        })
-                except Exception as stream_err:
-                    self.status_received.emit(f"Stream Start Error: {stream_err}")
+                self.connection.stream("StreamSmartMode", [str(self.model_name)])\
+                    .subscribe({
+                        "next": self.handle_stream_item,
+                        "complete": lambda: self.status_received.emit("Stream ended."),
+                        "error": lambda x: self.status_received.emit(f"Stream Error: {x}")
+                    })
+                
+                threading.Thread(target=self.send_screenshots_loop, daemon=True).start()
 
-            # 2. ATTACH IT TO ON_OPEN
-            # The library calls this ONLY when the socket is truly ready
-            self.connection.on_open(start_streaming)
-            
-            self.connection.on_close(lambda: self.status_received.emit("System: Smart Mode Disconnected."))
-            
-            # 3. START THE CONNECTION
-            print("DEBUG: Starting connection...")
+            self.connection.on_open(start_activities)
             self.connection.start()
 
-            # Keep thread alive
             while self.connection and self.is_running:
                 self.msleep(100)
+            
+            self.stop_screen_event.set()
 
         except Exception as e:
-            self.status_received.emit(f"SignalR Connection Error: {e}")
+            self.status_received.emit(f"Connection Error: {e}")
+    
+    def send_screenshots_loop(self):
+        while not self.stop_screen_event.is_set():
+            if self.connection:
+                try:
+                    screenshot = ImageGrab.grab()
+                    screenshot.thumbnail((1024, 1024)) 
+                    
+                    buffered = BytesIO()
+                    screenshot.save(buffered, format="JPEG", quality=70)
+                    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+                    
+                    self.connection.send("UpdateVisualContext", [img_str])
+                except Exception as e:
+                    print(f"Screen capture error: {e}")
+            
+            self.stop_screen_event.wait(2.0)
 
     def handle_stream_item(self, item):
         self.chunk_received.emit(str(item))
@@ -563,8 +565,8 @@ class ChatWindow(QMainWindow):
         if chunk.startswith("Smart Mode:") or chunk.startswith("System:"):
             self.add_message(chunk, False)
             return
-
-        if chunk.startswith("[System] Question detected:"):
+        
+        if chunk.startswith("[System] Detected intent:"):
             self.add_message(chunk, False)
             self.current_stream_msg_widget = self.add_message("...", False)
             self.current_stream_text = ""

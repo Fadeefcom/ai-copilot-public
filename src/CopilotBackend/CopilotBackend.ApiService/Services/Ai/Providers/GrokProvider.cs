@@ -25,28 +25,19 @@ public class GrokProvider : ILlmProvider
         _defaultModel = "grok-beta";
     }
 
-    public string ProviderName => "Grok (xAI)";
+    public string ProviderName => "Grok";
 
     public async Task<string> GenerateResponseAsync(
         IEnumerable<ChatMessage> messages,
-        string? overrideModel = null,
+        string model,
+        string? base64Image = null,
         CancellationToken ct = default)
     {
-        var modelToUse = overrideModel ?? _defaultModel;
+        var modelToUse = !string.IsNullOrEmpty(model) ? model : _defaultModel;
 
         _logger.LogInformation("Generating response using Grok model: {Model}", modelToUse);
 
-        var request = new JsonObject
-        {
-            ["model"] = modelToUse,
-            ["messages"] = new JsonArray(messages.Select(m => new JsonObject
-            {
-                ["role"] = m.Role.ToString().ToLowerInvariant(),
-                ["content"] = m.Content
-            }).ToArray()),
-            ["temperature"] = 0.4,
-            ["stream"] = false
-        };
+        var request = CreateRequest(messages, modelToUse, false, base64Image);
 
         try
         {
@@ -62,24 +53,15 @@ public class GrokProvider : ILlmProvider
 
     public async IAsyncEnumerable<string> StreamResponseAsync(
         IReadOnlyList<ChatMessage> context,
-        string? overrideModel = null,
+        string model,
+        string? base64Image = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var modelToUse = overrideModel ?? _defaultModel;
+        var modelToUse = !string.IsNullOrEmpty(model) ? model : _defaultModel;
 
         _logger.LogInformation("Starting stream using Grok model: {Model}", modelToUse);
 
-        var request = new JsonObject
-        {
-            ["model"] = modelToUse,
-            ["messages"] = new JsonArray(context.Select(m => new JsonObject
-            {
-                ["role"] = m.Role.ToString().ToLowerInvariant(),
-                ["content"] = m.Content
-            }).ToArray()),
-            ["stream"] = true,
-            ["temperature"] = 0.4
-        };
+        var request = CreateRequest(context, modelToUse, true, base64Image);
 
         HttpResponseMessage? responseMessage = null;
 
@@ -135,6 +117,58 @@ public class GrokProvider : ILlmProvider
                 yield return content;
             }
         }
+    }
+
+    private JsonObject CreateRequest(IEnumerable<ChatMessage> messages, string model, bool stream, string? base64Image)
+    {
+        var messageArray = new JsonArray();
+        var msgList = messages.ToList();
+
+        for (int i = 0; i < msgList.Count; i++)
+        {
+            var msg = msgList[i];
+            var isLast = i == msgList.Count - 1;
+
+            if (isLast && msg.Role == ChatRole.User && !string.IsNullOrEmpty(base64Image))
+            {
+                messageArray.Add(new JsonObject
+                {
+                    ["role"] = "user",
+                    ["content"] = new JsonArray
+                    {
+                        new JsonObject
+                        {
+                            ["type"] = "text",
+                            ["text"] = msg.Content
+                        },
+                        new JsonObject
+                        {
+                            ["type"] = "image_url",
+                            ["image_url"] = new JsonObject
+                            {
+                                ["url"] = $"data:image/jpeg;base64,{base64Image}"
+                            }
+                        }
+                    }
+                });
+            }
+            else
+            {
+                messageArray.Add(new JsonObject
+                {
+                    ["role"] = msg.Role.ToString().ToLowerInvariant(),
+                    ["content"] = msg.Content
+                });
+            }
+        }
+
+        return new JsonObject
+        {
+            ["model"] = model,
+            ["messages"] = messageArray,
+            ["temperature"] = 0.4,
+            ["stream"] = stream
+        };
     }
 
     private string ParseGrokResponse(JsonObject? response)

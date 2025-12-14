@@ -19,6 +19,9 @@ public class DeepgramAudioService : IDisposable
     private readonly StringBuilder _companionBuffer = new();
     private readonly object _bufferLock = new();
 
+    private readonly StringBuilder _smartModeBuffer = new();
+    private readonly object _smartModeLock = new();
+
     private readonly List<AudioStreamer> _streamers = new();
 
     public bool IsRunning => _streamers.Any();
@@ -74,11 +77,28 @@ public class DeepgramAudioService : IDisposable
     {
         if (role == SpeakerRole.Companion)
         {
+            lock (_smartModeLock)
+            {
+                if (_smartModeBuffer.Length > 0) _smartModeBuffer.Append(" ");
+                _smartModeBuffer.Append(text);
+            }
+
             lock (_bufferLock)
             {
                 if (_companionBuffer.Length > 0) _companionBuffer.Append(" ");
                 _companionBuffer.Append(text);
             }
+        }
+    }
+
+    public string PopNewText()
+    {
+        lock (_smartModeLock)
+        {
+            if (_smartModeBuffer.Length == 0) return string.Empty;
+            var text = _smartModeBuffer.ToString().Trim();
+            _smartModeBuffer.Clear();
+            return text;
         }
     }
 
