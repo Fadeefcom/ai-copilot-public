@@ -139,10 +139,15 @@ public class OpenAiProvider : ILlmProvider
     private JsonObject CreateBaseRequest(IEnumerable<ChatMessage> messages, string model, string? base64Image)
     {
         var msgArray = new JsonArray();
+        bool isNewModel = IsFixedParameterModel(model);
 
         foreach (var m in messages)
         {
-            if (m.Role == ChatRole.User && !string.IsNullOrEmpty(base64Image) && m == messages.Last())
+            ChatRole role = (m.Role == ChatRole.System && isNewModel)
+                      ? ChatRole.Developer
+                      : m.Role;
+
+            if (role == ChatRole.User && !string.IsNullOrEmpty(base64Image) && m == messages.Last())
             {
                 msgArray.Add(new JsonObject
                 {
@@ -179,6 +184,8 @@ public class OpenAiProvider : ILlmProvider
             request["temperature"] = 0.3;
             request["top_p"] = 0.95;
         }
+        else
+            request["reasoning_effort"] = "low";
 
         return request;
     }

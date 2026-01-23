@@ -21,7 +21,7 @@ public class AiOrchestrator
         _audioService = audioService;
     }
 
-    public async Task<string> ProcessRequestAsync(string modelName, string instruction)
+    public async Task<string> ProcessRequestAsync(string modelName, string instruction, string? Image)
     {
         if (!_audioService.IsRunning)
             return "Audio capture is not running.";
@@ -34,11 +34,11 @@ public class AiOrchestrator
         var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
         if (provider == null) throw new ArgumentException($"Model '{modelName}' not found.");
 
-        var messages = await _promptManager.BuildRequestMessagesAsync(instruction);
-        return await provider.GenerateResponseAsync(messages, version);
+        var messages = await _promptManager.BuildRequestMessagesAsync(instruction, Image != null);
+        return await provider.GenerateResponseAsync(messages, version, Image);
     }
 
-    public async Task<string> ProcessAssistRequestAsync(string modelName)
+    public async Task<string> ProcessAssistRequestAsync(string modelName, string? Image)
     {
         await _contextManager.CheckAndArchiveContextAsync();
 
@@ -48,11 +48,11 @@ public class AiOrchestrator
         var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
         if (provider == null) throw new ArgumentException($"Model '{modelName}' not found.");
 
-        var messages = await _promptManager.BuildAssistMessagesAsync();
-        return await provider.GenerateResponseAsync(messages, version);
+        var messages = await _promptManager.BuildAssistMessagesAsync(Image != null);
+        return await provider.GenerateResponseAsync(messages, version, Image);
     }
 
-    public async Task<string> ProcessFollowupRequestAsync(string modelName)
+    public async Task<string> ProcessFollowupRequestAsync(string modelName, string? Image)
     {
         await _contextManager.CheckAndArchiveContextAsync();
 
@@ -62,8 +62,8 @@ public class AiOrchestrator
         var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
         if (provider == null) throw new ArgumentException($"Model '{modelName}' not found.");
 
-        var messages = await _promptManager.BuildFollowupMessagesAsync();
-        return await provider.GenerateResponseAsync(messages, version);
+        var messages = await _promptManager.BuildFollowupMessagesAsync(Image != null);
+        return await provider.GenerateResponseAsync(messages, version, Image);
     }
 
     public async IAsyncEnumerable<string> StreamRequestAsync(string modelName, string prompt)

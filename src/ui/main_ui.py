@@ -10,10 +10,12 @@ import base64
 import threading
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QTextEdit, QLabel, QScrollArea, QFrame, 
-                             QPushButton, QSizePolicy, QComboBox)
+                             QHBoxLayout, QTextEdit, QLabel, QFrame, 
+                             QPushButton, QSizePolicy, QComboBox, QCheckBox,
+                             QListWidget, QListWidgetItem, QAbstractItemView)
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QTime
 from PyQt6.QtGui import QFont, QKeyEvent
+import keyboard
 
 import logging
 from signalrcore.hub_connection_builder import HubConnectionBuilder
@@ -66,6 +68,7 @@ class SignalRWorker(QThread):
         self.model_name = model_name
         self.connection = None
         self.is_running = True
+        self.stop_screen_event = threading.Event()        
 
     def run(self):
         try:
@@ -107,7 +110,7 @@ class SignalRWorker(QThread):
                     screenshot = ImageGrab.grab()
                     screenshot.thumbnail((1024, 1024)) 
                     
-                    buffered = BytesIO()
+                    buffered = io.BytesIO()
                     screenshot.save(buffered, format="JPEG", quality=70)
                     img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
                     
@@ -144,7 +147,7 @@ class BackendWorker(QThread):
             resp = requests.post(
                 url, 
                 json=self.payload, 
-                timeout=10
+                timeout=20
             )
             
             if resp.status_code == 200:
@@ -205,8 +208,8 @@ class ChatMessage(QFrame):
     def __init__(self, text, is_user=False):
         super().__init__()
         self.setFrameShape(QFrame.Shape.NoFrame)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 2, 5, 2)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(5, 2, 5, 2)
         
         h_layout = QHBoxLayout()
         self.label = QLabel()
@@ -225,7 +228,7 @@ class ChatMessage(QFrame):
             h_layout.addWidget(self.label)
             self.label.setStyleSheet("color:#E0E0E0; background-color: rgba(40,40,40,0.6); padding:4px; border-radius:4px;")
         
-        layout.addLayout(h_layout)
+        self._layout.addLayout(h_layout)
         
     def set_markdown(self, text: str):
         def repl_code(match):
@@ -236,6 +239,9 @@ class ChatMessage(QFrame):
         md_text = re.sub(r'```(\w*)\n([\s\S]*?)```', repl_code, text)
         md_text = md_text.replace('\n', '<br>')
         self.label.setText(md_text)
+
+    def sizeHint(self):
+        return self._layout.sizeHint()
 
 class ChatInput(QTextEdit):
     send_signal = pyqtSignal()
@@ -248,6 +254,7 @@ class ChatInput(QTextEdit):
             super().keyPressEvent(event)
 
 class ChatWindow(QMainWindow):
+    toggle_signal = pyqtSignal()
     def __init__(self, current_lang='en'):
         super().__init__()
         self.current_lang = current_lang
@@ -260,6 +267,8 @@ class ChatWindow(QMainWindow):
         
         self.current_stream_msg_widget = None
         self.current_stream_text = ""
+        self.typing_item = None
+        self.typing_label = None
 
         self.setWindowTitle(self.texts['title'])
         self.setGeometry(50, 50, 600, 700)
@@ -269,6 +278,16 @@ class ChatWindow(QMainWindow):
         self._set_window_affinity()
         
         self._init_ui()
+        self.toggle_signal.connect(self.toggle_visibility)
+        keyboard.add_hotkey('ctrl+/', lambda: self.toggle_signal.emit())
+    
+    def toggle_visibility(self):
+        if self.isVisible():
+            self.hide()
+        else:
+            self.show()
+            # self.activateWindow()
+            self.raise_()
 
     def closeEvent(self, event):
         try:
@@ -335,6 +354,10 @@ class ChatWindow(QMainWindow):
         top_layout.addLayout(center_box)
 
         right_box = QHBoxLayout()
+
+        self.screenshot_check = QCheckBox("Screenshots")
+        self.screenshot_check.setStyleSheet("color: #AAAAAA; margin-right: 10px;")
+        right_box.addWidget(self.screenshot_check)
         
         self.smart_button = QPushButton(self.texts['smart_btn'])
         self.smart_button.setCheckable(True)
@@ -352,16 +375,13 @@ class ChatWindow(QMainWindow):
 
         main_layout.addLayout(top_layout)
 
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setStyleSheet("background: transparent; border: none;")
+        self.chat_list = QListWidget()
+        self.chat_list.setStyleSheet("background: transparent; border: none;")
+        self.chat_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.chat_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.chat_list.setSpacing(5)
         
-        self.chat_container = QWidget()
-        self.chat_layout = QVBoxLayout(self.chat_container)
-        self.chat_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.scroll_area.setWidget(self.chat_container)
-        
-        main_layout.addWidget(self.scroll_area)
+        main_layout.addWidget(self.chat_list)
 
         self.input_box = ChatInput()
         self.input_box.setFixedHeight(50)
@@ -407,16 +427,24 @@ class ChatWindow(QMainWindow):
         self.elapsed = QTime(0,0,0)
 
     def add_message(self, text, is_user=False):
-        msg = ChatMessage(text, is_user)
-        self.chat_layout.addWidget(msg)
-        QApplication.processEvents()
-        self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
-        return msg
+        widget = ChatMessage(text, is_user)
+        item = QListWidgetItem()
+        item.setSizeHint(widget.sizeHint())
+        
+        self.chat_list.addItem(item)
+        self.chat_list.setItemWidget(item, widget)
+        
+        self.chat_list.scrollToBottom()
+        return widget
 
     def _initiate_request(self, endpoint, payload):
         self.typing_label = ChatMessage("...", is_user=False)
-        self.chat_layout.addWidget(self.typing_label)
-        self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
+        self.typing_item = QListWidgetItem()
+        self.typing_item.setSizeHint(self.typing_label.sizeHint())
+        
+        self.chat_list.addItem(self.typing_item)
+        self.chat_list.setItemWidget(self.typing_item, self.typing_label)
+        self.chat_list.scrollToBottom()
         
         self.typing_thread = TypingIndicator()
         self.threads.append(self.typing_thread)
@@ -428,41 +456,72 @@ class ChatWindow(QMainWindow):
         
         def handle_response(resp_text):
             self.typing_thread.stop()
-            try:
-                self.chat_layout.removeWidget(self.typing_label)
-                self.typing_label.deleteLater()
-            except:
-                pass
+            if self.typing_item:
+                row = self.chat_list.row(self.typing_item)
+                if row >= 0:
+                    self.chat_list.takeItem(row)
+                self.typing_item = None
+                self.typing_label = None
+
             self.add_message(resp_text, is_user=False)
             
         worker.finished_signal.connect(handle_response)
         worker.start()
+    
+    def _capture_screenshot(self):
+        if hasattr(self, 'screenshot_check') and self.screenshot_check.isChecked():
+            try:
+                screenshot = ImageGrab.grab()
+                screenshot.thumbnail((1024, 1024))
+                buffered = io.BytesIO()
+                screenshot.save(buffered, format="JPEG", quality=70)
+                return base64.b64encode(buffered.getvalue()).decode("utf-8")
+            except Exception as e:
+                print(f"Screenshot error: {e}")
+        return None
 
-    def send_to_backend(self, user_text):
+    def send_to_backend(self, user_text, image_data=None):
         current_model = self.model_dropdown.currentText()
-        self._initiate_request("/message", {"Text": user_text, "Model": current_model})
+        payload = {
+            "Text": user_text, 
+            "Model": current_model,
+            "Image": image_data
+        }
+        self._initiate_request("/message", payload)
 
     def send_message(self):
-        text = self.input_box.toPlainText().strip()
+        text = self.input_box.toPlainText().strip()        
+        image_base64 = self._capture_screenshot()
         if not text:
             return
         self.add_message(text, is_user=True)
         self.input_box.clear()
-        self.send_to_backend(text)
+        self.send_to_backend(text, image_base64)
 
     def send_button_prompt(self, prompt_type):
         current_model = self.model_dropdown.currentText()
+        image_base64 = self._capture_screenshot()
         
         if prompt_type == 'say':
-            self._initiate_request("/assist", {"Model": current_model})
+            text = self.texts['say_btn']
+            self.add_message(text, is_user=True)
+            self._initiate_request("/assist", {
+                "Model": current_model, 
+                "Image": image_base64
+            })
             
         elif prompt_type == 'followup':
-            self._initiate_request("/followup", {"Model": current_model})
+            text = self.texts['followup_btn']
+            self.add_message(text, is_user=True)
+            self._initiate_request("/followup", {
+                "Model": current_model, 
+                "Image": image_base64
+            })
             
         elif prompt_type == 'assist':
             text = self.texts['assist_btn']
             self.add_message(text, is_user=True)
-            self.send_to_backend(text)
+            self.send_to_backend(text, image_base64)
 
     def on_start(self):
         if self.started:
@@ -580,7 +639,11 @@ class ChatWindow(QMainWindow):
         if self.current_stream_msg_widget:
             self.current_stream_text += chunk
             self.current_stream_msg_widget.set_markdown(self.current_stream_text)
-            self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
+            
+            item = self.chat_list.item(self.chat_list.count() - 1)
+            if item:
+                item.setSizeHint(self.current_stream_msg_widget.sizeHint())
+            self.chat_list.scrollToBottom()
 
     def on_lang_dropdown_change(self, text):
         if self.started:

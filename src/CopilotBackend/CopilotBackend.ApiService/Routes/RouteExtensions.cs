@@ -20,7 +20,7 @@ public static class RouteExtensions
         {
             try
             {
-                var response = await orchestrator.ProcessRequestAsync(req.Model, req.Text);
+                var response = await orchestrator.ProcessRequestAsync(req.Model, req.Text, req.Image);
                 return Results.Ok(new { Response = response });
             }
             catch (ArgumentException ex)
@@ -33,7 +33,7 @@ public static class RouteExtensions
         {
             try
             {
-                var response = await orchestrator.ProcessAssistRequestAsync(req.Model);
+                var response = await orchestrator.ProcessAssistRequestAsync(req.Model, req.Image);
                 return Results.Ok(new { Response = response });
             }
             catch (ArgumentException ex)
@@ -46,7 +46,7 @@ public static class RouteExtensions
         {
             try
             {
-                var response = await orchestrator.ProcessFollowupRequestAsync(req.Model);
+                var response = await orchestrator.ProcessFollowupRequestAsync(req.Model, req.Image);
                 return Results.Ok(new { Response = response });
             }
             catch (ArgumentException ex)
@@ -69,6 +69,6 @@ public static class RouteExtensions
         });
     }
 
-    public record MessageRequest(string Text, string Model);
-    public record AiRequest(string Model);
+    public record MessageRequest(string Text, string Model, string? Image);
+    public record AiRequest(string Model, string? Image);
 }

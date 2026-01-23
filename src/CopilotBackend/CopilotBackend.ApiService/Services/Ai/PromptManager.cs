@@ -18,7 +18,7 @@ public class PromptManager
         _promptsFolder = Path.Combine(env.ContentRootPath, "promts");
     }
 
-    public async Task<List<ChatMessage>> BuildAssistMessagesAsync()
+    public async Task<List<ChatMessage>> BuildAssistMessagesAsync(bool ifImage = false)
     {
         var systemPrompt = await LoadPromptAsync(_assistPromptFile);
         var userPersona = await LoadPromptAsync(_userContextFile);
@@ -26,7 +26,18 @@ public class PromptManager
 
         var fullSystemMessage = new StringBuilder()
             .AppendLine("--- SYSTEM INSTRUCTIONS ---")
-            .AppendLine(systemPrompt)
+            .AppendLine(systemPrompt);
+
+        if (ifImage)
+            fullSystemMessage
+                .AppendLine("--- VISION TASK: CODE IDENTIFICATION AND SOLUTION ---")
+                .AppendLine("1. Analyze the syntax in the image to strictly identify the programming language.")
+                .AppendLine("2. Look for language-specific indicators.")
+                .AppendLine("3. Fix OCR-induced errors.")
+                .AppendLine("4. Provide a complete solution written ONLY in the SAME language as identified in the image.")
+                .AppendLine("5. Output ONLY the source code.");
+
+        var systemMessage = fullSystemMessage
             .AppendLine("--- USER PERSONA (ME) ---")
             .AppendLine(userPersona)
             .ToString();
@@ -39,20 +50,30 @@ public class PromptManager
 
         return new List<ChatMessage>
         {
-            new(ChatRole.System, fullSystemMessage),
+            new(ChatRole.System, systemMessage),
             new(ChatRole.User, contextMessage)
         };
     }
 
-    public async Task<List<ChatMessage>> BuildFollowupMessagesAsync()
+    public async Task<List<ChatMessage>> BuildFollowupMessagesAsync(bool ifImage = false)
     {
         var systemPrompt = await LoadPromptAsync(_followupPromptFile);
         var dialogueHistory = _contextService.GetFormattedLog();
 
         var fullSystemMessage = new StringBuilder()
             .AppendLine("--- SYSTEM INSTRUCTIONS ---")
-            .AppendLine(systemPrompt)
-            .ToString();
+            .AppendLine(systemPrompt);
+
+            if (ifImage)
+                fullSystemMessage
+                    .AppendLine("--- VISION TASK: CODE IDENTIFICATION AND SOLUTION ---")
+                    .AppendLine("1. Analyze the syntax in the image to strictly identify the programming language.")
+                    .AppendLine("2. Look for language-specific indicators.")
+                    .AppendLine("3. Fix OCR-induced errors.")
+                    .AppendLine("4. Provide a complete solution written ONLY in the SAME language as identified in the image.")
+                    .AppendLine("5. Output ONLY the source code.");
+
+        var systemMessage = fullSystemMessage.ToString();
 
         var contextMessage = new StringBuilder()
             .AppendLine("--- DIALOGUE TRANSCRIPT ---")
@@ -62,12 +83,12 @@ public class PromptManager
 
         return new List<ChatMessage>
         {
-            new(ChatRole.System, fullSystemMessage),
+            new(ChatRole.System, systemMessage),
             new(ChatRole.User, contextMessage)
         };
     }
 
-    public async Task<List<ChatMessage>> BuildRequestMessagesAsync(string userInstruction)
+    public async Task<List<ChatMessage>> BuildRequestMessagesAsync(string userInstruction, bool ifImage = false)
     {
         var systemPrompt = await LoadPromptAsync(_systemPromptFile);
         var userPersona = await LoadPromptAsync(_userContextFile);
@@ -75,7 +96,18 @@ public class PromptManager
 
         var fullSystemMessage = new StringBuilder()
             .AppendLine("--- SYSTEM INSTRUCTIONS ---")
-            .AppendLine(systemPrompt)
+            .AppendLine(systemPrompt);
+
+        if (ifImage)
+            fullSystemMessage
+                .AppendLine("--- VISION TASK: CODE IDENTIFICATION AND SOLUTION ---")
+                .AppendLine("1. Analyze the syntax in the image to strictly identify the programming language.")
+                .AppendLine("2. Look for language-specific indicators.")
+                .AppendLine("3. Fix OCR-induced errors.")
+                .AppendLine("4. Provide a complete solution written ONLY in the SAME language as identified in the image.")
+                .AppendLine("5. Output ONLY the source code.");
+
+        var systemMessage = fullSystemMessage
             .AppendLine("--- USER PERSONA (ME) ---")
             .AppendLine(userPersona)
             .ToString();
@@ -90,7 +122,7 @@ public class PromptManager
 
         return new List<ChatMessage>
         {
-            new(ChatRole.System, fullSystemMessage),
+            new(ChatRole.System, systemMessage),
             new(ChatRole.User, fullUserMessage)
         };
     }

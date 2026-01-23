@@ -6,7 +6,8 @@ public enum ChatRole
 {
     System,
     User,
-    Assistant
+    Assistant,
+    Developer
 }
 
 public enum SpeakerRole
