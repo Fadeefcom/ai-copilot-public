@@ -73,14 +73,18 @@ class ChatWindow(QMainWindow):
         self.mic_thread = AudioCaptureThread(self.signalr_worker, role="me")
         self.mic_thread.start()
 
-        self.speaker_thread = AudioCaptureThread(self.signalr_worker, role="companion")
-        self.speaker_thread.start()
+        QTimer.singleShot(500, self._start_speaker_thread)
         
         self.started = True
         self.start_button.setText(self.texts['start'])
         self.update_ui_state(True)
         self.timer.start(1000)
         self.timer_label.setVisible(True)
+
+    def _start_speaker_thread(self):
+        if self.started:
+            self.speaker_thread = AudioCaptureThread(self.signalr_worker, role="companion")
+            self.speaker_thread.start()
 
     def on_stop(self):
         self.stop_typing()
@@ -168,6 +172,13 @@ class ChatWindow(QMainWindow):
 
     def add_message(self, text, is_user=False):
         widget = ChatMessage(text, is_user)
+        if text.startswith("System:"):
+            if "Lost" in text or "Error" in text:
+                widget.label.setStyleSheet("color: #FF5555; background-color: rgba(40,20,20,0.6); padding:4px; border-radius:4px;")
+            elif "Connected" in text:
+                widget.label.setStyleSheet("color: #55FF55; background-color: rgba(20,40,20,0.6); padding:4px; border-radius:4px;")
+            else:
+                widget.label.setStyleSheet("color: #AAAAAA; background-color: rgba(40,40,40,0.6); padding:4px; border-radius:4px;")
         item = QListWidgetItem()
         item.setSizeHint(widget.sizeHint())
         self.chat_list.addItem(item)

@@ -8,6 +8,8 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from signalrcore.hub_connection_builder import HubConnectionBuilder
 from constants import HUB_URL
 
+audio_init_lock = threading.Lock()
+
 class SignalRWorker(QThread):
     chunk_received = pyqtSignal(str)
     status_received = pyqtSignal(str)
@@ -19,6 +21,7 @@ class SignalRWorker(QThread):
         self.connection = None
         self.is_running = True
         self.screenshots_enabled = False
+        self._send_lock = threading.Lock()
 
     def run(self):
         hub_url = HUB_URL.replace("http", "ws", 1) if HUB_URL.startswith("http") else HUB_URL
@@ -51,53 +54,68 @@ class SignalRWorker(QThread):
                     screenshot.save(buf, format="JPEG", quality=70)
                     img_str = base64.b64encode(buf.getvalue()).decode("utf-8")
                     if self.is_running:
-                        self.connection.send("UpdateVisualContext", [img_str])
+                        with self._send_lock:
+                            self.connection.send("UpdateVisualContext", [img_str])
                 except:
                     pass
             threading.Event().wait(2.0)
 
     def start_audio(self, lang):
         if self.connection and self.is_running: 
-            self.connection.send("StartAudio", [lang])
+            with self._send_lock:
+                try:
+                    self.connection.send("StartAudio", [lang])
+                except:
+                    pass
 
     def stop_audio(self):
         if self.connection: 
-            try: self.connection.send("StopAudio", [])
-            except: pass
+            with self._send_lock:
+                try: 
+                    self.connection.send("StopAudio", [])
+                except: 
+                    pass
 
     def send_audio_chunk(self, chunk, role):
         if self.connection and self.is_running:
-            try:
-                encoded = base64.b64encode(chunk).decode('utf-8')
-                self.connection.send("SendAudioChunk", [encoded, role])
-            except:
-                pass
+            with self._send_lock:
+                try:
+                    encoded = base64.b64encode(chunk).decode('utf-8')
+                    self.connection.send("SendAudioChunk", [encoded, role])
+                except Exception as e:
+                    print(f"Send error: {e}")
 
     def send_screenshot(self, img_b64):
         if self.connection and self.is_running:
-            try: self.connection.send("UpdateVisualContext", [img_b64])
-            except: pass
+            with self._send_lock:
+                try: 
+                    self.connection.send("UpdateVisualContext", [img_b64])
+                except: 
+                    pass
 
     def invoke_stream(self, method_name, args):
         if self.connection and self.is_running:
-            self.connection.stream(method_name, args).subscribe({
-                "next": lambda chunk: self.chunk_received.emit(str(chunk)),
-                "complete": lambda _: self.chunk_received.emit("[DONE]"),
-                "error": lambda e: self.status_received.emit(f"Stream Error: {e}")
-            })
+            with self._send_lock:
+                try:
+                    self.connection.stream(method_name, args).subscribe({
+                        "next": lambda chunk: self.chunk_received.emit(str(chunk)),
+                        "complete": lambda _: self.chunk_received.emit("[DONE]"),
+                        "error": lambda e: self.status_received.emit(f"Stream Error: {e}")
+                    })
+                except:
+                    pass
 
     def stop(self):
         self.is_running = False
-        
         if self.connection:
             try:
-                self.connection.send("StopAudio", [])
-                self.msleep(200) 
+                with self._send_lock:
+                    self.connection.send("StopAudio", [])
+                self.msleep(500) 
                 self.connection.stop()
+                self.status_received.emit("System: Stopped")
             except:
-                pass
-        
-        self.status_received.emit("System: Socket Disconnected")
+                self.status_received.emit("System: Stopped with error")
 
 class AudioCaptureThread(QThread):
     def __init__(self, worker, role="me"):
@@ -108,39 +126,51 @@ class AudioCaptureThread(QThread):
         self.chunk_size = 2048
 
     def run(self):
-        p = pyaudio.PyAudio()
-        try:
-            device_info = None
-            if self.role == "me":
-                device_info = p.get_default_input_device_info()
-            else:
-                wasapi_info = next((p.get_host_api_info_by_index(i) 
-                                   for i in range(p.get_host_api_count()) 
-                                   if p.get_host_api_info_by_index(i)['type'] == pyaudio.paWASAPI), None)
-                if wasapi_info:
-                    default_out = p.get_device_info_by_index(wasapi_info['defaultOutputDevice'])
-                    for i in range(p.get_device_count()):
-                        dev = p.get_device_info_by_index(i)
-                        if dev["isLoopbackDevice"] and default_out["name"] in dev["name"]:
-                            device_info = dev
-                            break
+        p = None
+        stream = None
+        native_rate = 0
+        channels = 0
+        
+        with audio_init_lock:
+            try:
+                p = pyaudio.PyAudio()
+                device_info = None
+                if self.role == "me":
+                    device_info = p.get_default_input_device_info()
+                else:
+                    wasapi_info = next((p.get_host_api_info_by_index(i) 
+                                       for i in range(p.get_host_api_count()) 
+                                       if p.get_host_api_info_by_index(i)['type'] == pyaudio.paWASAPI), None)
+                    if wasapi_info:
+                        default_out = p.get_device_info_by_index(wasapi_info['defaultOutputDevice'])
+                        for i in range(p.get_device_count()):
+                            dev = p.get_device_info_by_index(i)
+                            if dev["isLoopbackDevice"] and default_out["name"] in dev["name"]:
+                                device_info = dev
+                                break
 
-            if not device_info:
+                if not device_info:
+                    if p: p.terminate()
+                    return
+
+                native_rate = int(device_info['defaultSampleRate'])
+                channels = int(device_info['maxInputChannels'])
+                
+                stream = p.open(
+                    format=pyaudio.paInt16,
+                    channels=channels,
+                    rate=native_rate,
+                    input=True,
+                    input_device_index=device_info['index'],
+                    frames_per_buffer=self.chunk_size
+                )
+            except Exception as e:
+                print(f"Failed to init {self.role}: {e}")
+                if p: p.terminate()
                 return
 
-            native_rate = int(device_info['defaultSampleRate'])
-            channels = int(device_info['maxInputChannels'])
+        try:
             target_rate = 16000
-            
-            stream = p.open(
-                format=pyaudio.paInt16,
-                channels=channels,
-                rate=native_rate,
-                input=True,
-                input_device_index=device_info['index'],
-                frames_per_buffer=self.chunk_size
-            )
-
             while self.is_running:
                 try:
                     raw_data = stream.read(self.chunk_size, exception_on_overflow=False)
@@ -148,7 +178,6 @@ class AudioCaptureThread(QThread):
                         continue
                     
                     audio_np = np.frombuffer(raw_data, dtype=np.int16).copy()
-                    
                     if channels > 1:
                         audio_np = audio_np[::channels]
                     
@@ -163,18 +192,17 @@ class AudioCaptureThread(QThread):
                             np.linspace(0, 1, len(audio_np)),
                             audio_np
                         ).astype(np.int16)
-                        
                         self.worker.send_audio_chunk(audio_resampled.tobytes(), self.role)
                     else:
                         self.worker.send_audio_chunk(audio_np.tobytes(), self.role)
-                except Exception as e:
-                    print(f"Capture error: {e}")
+                except:
                     continue
-
-            stream.stop_stream()
-            stream.close()
         finally:
-            p.terminate()
+            if stream:
+                stream.stop_stream()
+                stream.close()
+            if p:
+                p.terminate()
 
     def stop(self):
         self.is_running = False
