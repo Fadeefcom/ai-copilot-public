@@ -1,4 +1,11 @@
-﻿### USER CONTEXT (INFORMATION ABOUT ME):
+﻿# Important
+Core Focus (90% of Content):
+Architecture: Clean Architecture, Domain-Driven Design (DDD), Hexagonal Architecture.
+Design Patterns: Mastery of SOLID, GoF, and microservices patterns (Saga, Outbox, CQRS, Event Sourcing).
+Tech Stack: Deep dives into .NET 8+, C#, EF Core optimization, asynchronous programming, and memory management.
+System Design: API design (REST/gRPC), distributed caching, and message brokers (RabbitMQ/Kafka).
+
+### USER CONTEXT (INFORMATION ABOUT ME):
 
 The user is a Senior .NET Developer with a strong academic background in Applied Informatics (Bachelor's) and Artificial Intelligence (Master's). They began coding during university and worked professionally throughout their studies. In both educational and work contexts, they frequently bridge theory and practice — applying algorithms, building distributed systems, and deploying cloud-native infrastructure.
 
@@ -29,7 +36,46 @@ Key Topics: Distributed systems, cloud-native, OAuth 2.0, async messaging, Cosmo
 - Focused on scalability, observability, and clean architecture
 
 Academic relevance: Demonstrates applied use of infrastructure-as-code, messaging queues, and high-availability design  
-Status: Project shut down due to low ROI
+Professional Experience: ETNA
+Role: Senior .NET Developer
+
+Period: September 2024 – Present
+
+Domain: Financial Markets / Clearing & Settlement
+
+Executive Summary
+At ETNA, I am a key contributor to a team of five engineers developing a high-performance Clearing & Settlement Platform. My primary focus is building the core engine that processes financial transactions, calculates fees, and manages real-time integrations with external trading venues and brokers. The platform is designed for single-tenant deployment, meaning we provide dedicated, isolated environments for each institutional client in Azure.
+
+Core Technical Contributions
+1. High-Performance Integration Layer (REST & API)
+I designed and optimized the integration gateways that connect our clearing engine to external brokers and market venues.
+
+Latency over RPS: Unlike typical consumer apps, our success is measured in milliseconds of end-to-end latency. I optimized the HTTP stack using IHttpClientFactory and fine-tuned SocketsHttpHandler to ensure stable, low-latency connections.
+
+Asynchronous Processing: By utilizing non-blocking I/O and Task-based programming, I ensured the system remains responsive even when handling complex settlement cycles.
+
+2. Fault-Tolerant & Resilient Architecture
+In fintech, data loss is not an option. I implemented several patterns to ensure the system is fault-tolerant:
+
+Resilience Patterns: I utilized Polly to implement Circuit Breakers, Retries with Exponential Backoff, and Bulkhead Isolation. This protects our core engine from "cascading failures" when external vendor APIs are unstable.
+
+The Outbox Pattern: To guarantee data consistency between our SQL databases and our messaging bus (RabbitMQ/MassTransit), I implemented the Outbox pattern. This ensures that a financial transaction is only considered complete if both the database record and the corresponding event message are successfully processed.
+
+Strict Idempotency: I built logic to handle duplicate requests gracefully using unique CorrelationIDs, ensuring that retried requests from brokers never result in double-clearing of trades.
+
+3. Infrastructure as Code & Cloud-Native Ownership
+I took full ownership of how our code runs in production.
+
+Single-Tenant Azure Deployments: I managed the provisioning of isolated Azure environments for our clients using Terraform. This ensures strict data privacy and eliminates the "noisy neighbor" problem, providing predictable performance.
+
+Observability: I established comprehensive monitoring using Azure Application Insights, focusing on p95 and p99 latency metrics to proactively identify performance regressions.
+
+Key Achievements & Impact
+Latency Reduction: Through code-level optimizations (minimizing GC pressure and optimizing hot paths in C#), I contributed to maintaining sub-millisecond processing times for core clearing logic.
+
+Reliable Scaling: Successfully supported the onboarding of new institutional clients by automating the deployment of dedicated environments, reducing "time-to-market" for new client setups.
+
+Engineering Excellence: As a Senior member, I drove high standards in our Code Review process and championed the use of the Result Pattern for cleaner, more predictable error handling across the backend.
 
 **.NET Developer — KPMG, Valuation Tools Team (02/2021 – 02/2023)**  
 Key Topics: Financial valuation systems, calculation engines, Excel exports

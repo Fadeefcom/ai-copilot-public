@@ -5,8 +5,9 @@ using CopilotBackend.ApiService.Services;
 using CopilotBackend.ApiService.Services.Ai;
 using CopilotBackend.ApiService.Services.Ai.Providers;
 using CopilotBackend.ApiService.Services.Hubs;
-using Microsoft.AspNetCore.Mvc.Abstractions;
 using Refit;
+using Serilog;
+using Serilog.Events;
 using System.Text;
 
 namespace CopilotBackend.ApiService;
@@ -17,6 +18,13 @@ public class Program
     {
         Console.OutputEncoding = Encoding.UTF8;
         Console.InputEncoding = Encoding.UTF8;
+
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
+            .Enrich.FromLogContext()
+            .WriteTo.Console()
+            .WriteTo.File("logs/copilot-.txt", rollingInterval: RollingInterval.Day)
+            .CreateLogger();
 
         var backendUrl = Environment.GetEnvironmentVariable("BACKEND_URL") ?? "http://localhost:57875";
         
@@ -39,7 +47,7 @@ public class Program
         builder.Services.Configure<LlmOptions>(builder.Configuration.GetSection(LlmOptions.SectionName));
 
         // Core Services
-        builder.Services.AddLogging();
+        builder.Services.AddSerilog();
         builder.Services.AddOpenApi();
         builder.Services.AddHttpClient();
         builder.Services.AddSignalR();
