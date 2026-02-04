@@ -3,9 +3,9 @@ import keyboard
 import io
 import base64
 from PIL import ImageGrab
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QPushButton, QComboBox, QCheckBox, 
-                             QListWidget, QListWidgetItem, QAbstractItemView, QLabel)
+from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+                             QPushButton, QComboBox, QCheckBox, QListWidget, 
+                             QListWidgetItem, QAbstractItemView, QLabel, QApplication)
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QTime
 from PyQt6.QtGui import QFont
 
@@ -38,7 +38,8 @@ class ChatWindow(QMainWindow):
         self._set_window_affinity()
         
         self._init_ui()
-        self.init_signalr()
+        
+        self.start_button.setEnabled(True)
         
         self.toggle_signal.connect(self.toggle_visibility)
         self.action_signal.connect(self.send_button_prompt)
@@ -46,13 +47,129 @@ class ChatWindow(QMainWindow):
         keyboard.add_hotkey('ctrl+/', lambda: self.toggle_signal.emit())
         keyboard.add_hotkey('f1', lambda: self.action_signal.emit('say'))
         keyboard.add_hotkey('f2', lambda: self.action_signal.emit('followup'))
+    
+    def closeEvent(self, event):
+        self.on_stop()
+        event.accept()
 
-    def init_signalr(self):
-        self.signalr_worker = SignalRWorker(self.current_model)
+    def on_start(self):
+        if self.started: return
+        
+        self.start_button.setEnabled(False)
+        self.lang_dropdown.setEnabled(False)
+        self.start_button.setText("...")
+        
+        self.signalr_worker = SignalRWorker(self.model_dropdown.currentText())
         self.signalr_worker.chunk_received.connect(self.on_llm_chunk)
         self.signalr_worker.status_received.connect(lambda s: self.add_message(s, False))
-        self.signalr_worker.socket_ready.connect(lambda: self.start_button.setEnabled(True))
+        self.signalr_worker.socket_ready.connect(self.on_socket_connected)
         self.signalr_worker.start()
+
+    def on_socket_connected(self):
+        lang = 'ru' if self.current_lang == 'ru' else 'en'
+        self.signalr_worker.start_audio(lang)
+        
+        self.audio_capture_thread = AudioCaptureThread(self.signalr_worker)
+        self.audio_capture_thread.start()
+        
+        self.started = True
+        self.start_button.setText(self.texts['start'])
+        self.update_ui_state(True)
+        self.timer.start(1000)
+        self.timer_label.setVisible(True)
+
+    def on_stop(self):
+        if not self.started: return
+        
+        if self.audio_capture_thread:
+            self.audio_capture_thread.stop()
+            self.audio_capture_thread.wait()
+            self.audio_capture_thread = None
+            
+        if self.signalr_worker:
+            self.signalr_worker.stop_audio()
+            self.signalr_worker.stop()
+            self.signalr_worker.wait()
+            self.signalr_worker = None
+
+        self.started = False
+        self.update_ui_state(False)
+        self.lang_dropdown.setEnabled(True)
+        self.timer.stop()
+        self.timer_label.setVisible(False)
+        self.add_message("System: Socket Disconnected.", False)
+
+    def send_message(self):
+        if not self.started: return
+        text = self.input_box.toPlainText().strip()
+        if not text: return
+        
+        self.add_message(text, is_user=True)
+        img = self._capture_screenshot()
+        self.start_typing()
+        self.signalr_worker.invoke_stream("SendMessage", [text, self.model_dropdown.currentText(), img])
+        self.input_box.clear()
+
+    def send_button_prompt(self, p_type):
+        if not self.started: return
+        img = self._capture_screenshot()
+        self.signalr_worker.send_screenshot(img)
+        self.add_message(self.texts[f'{p_type}_btn'], is_user=True)
+        self.start_typing()
+        
+        method = {"say": "SendAssistRequest", "followup": "SendFollowupRequest", "assist": "SendMessage"}[p_type]
+        args = [self.model_dropdown.currentText(), img]
+        if p_type == "assist": args.insert(0, self.texts['assist_btn'])
+        self.signalr_worker.invoke_stream(method, args)
+
+    def on_llm_chunk(self, chunk):
+        self.stop_typing()
+        if chunk == "[DONE]":
+            self.current_stream_msg_widget = None
+            return
+        if not self.current_stream_msg_widget:
+            self.current_stream_msg_widget = self.add_message("", False)
+            self.current_stream_text = ""
+        self.current_stream_text += chunk
+        self.current_stream_msg_widget.set_markdown(self.current_stream_text)
+        self.chat_list.scrollToBottom()
+
+    def start_typing(self):
+        if self.typing_item: return
+        label = ChatMessage("...", is_user=False)
+        self.typing_item = QListWidgetItem()
+        self.typing_item.setSizeHint(label.sizeHint())
+        self.chat_list.addItem(self.typing_item)
+        self.chat_list.setItemWidget(self.typing_item, label)
+        self.typing_thread = TypingIndicator()
+        self.typing_thread.update_signal.connect(lambda d: label.set_markdown(d))
+        self.typing_thread.start()
+        self.chat_list.scrollToBottom()
+
+    def stop_typing(self):
+        if self.typing_item:
+            self.typing_thread.stop()
+            self.chat_list.takeItem(self.chat_list.row(self.typing_item))
+            self.typing_item = None
+
+    def add_message(self, text, is_user=False):
+        widget = ChatMessage(text, is_user)
+        item = QListWidgetItem()
+        item.setSizeHint(widget.sizeHint())
+        self.chat_list.addItem(item)
+        self.chat_list.setItemWidget(item, widget)
+        self.chat_list.scrollToBottom()
+        return widget
+
+    def update_ui_state(self, is_started):
+        self.start_button.setVisible(not is_started)
+        self.start_button.setEnabled(True)
+        self.stop_button.setVisible(is_started)
+        self.input_box.setEnabled(is_started)
+        self.say_button.setEnabled(is_started)
+        self.followup_button.setEnabled(is_started)
+        self.assist_button.setEnabled(is_started)
+        self.smart_button.setEnabled(is_started)
 
     def _init_ui(self):
         central_widget = QWidget()
@@ -74,7 +191,6 @@ class ChatWindow(QMainWindow):
         self.start_button = QPushButton(self.texts['start'])
         self.start_button.clicked.connect(self.on_start)
         self.start_button.setFixedSize(60, 24)
-        self.start_button.setEnabled(False)
         self.start_button.setStyleSheet("QPushButton{background-color: rgba(50,150,50,0.99); color:#FFFFFF; border-radius:6px;} QPushButton:hover{background-color: rgba(70,180,70,1);}")
         
         self.stop_button = QPushButton(self.texts['stop'])
@@ -135,86 +251,6 @@ class ChatWindow(QMainWindow):
         self.timer = QTimer(); self.timer.timeout.connect(self.update_timer)
         self.elapsed = QTime(0,0,0)
 
-    def on_start(self):
-        if self.started or not self.signalr_worker: return
-        lang = 'ru' if self.current_lang == 'ru' else 'en'
-        self.signalr_worker.start_audio(lang)
-        self.audio_capture_thread = AudioCaptureThread(self.signalr_worker)
-        self.audio_capture_thread.start()
-        self.started = True
-        self.update_ui_state(True)
-        self.timer.start(1000)
-        self.timer_label.setVisible(True)
-
-    def on_stop(self):
-        if not self.started: return
-        if self.audio_capture_thread:
-            self.audio_capture_thread.stop(); self.audio_capture_thread.wait()
-        self.signalr_worker.stop_audio()
-        self.started = False
-        self.update_ui_state(False)
-        self.timer.stop(); self.timer_label.setVisible(False)
-
-    def send_message(self):
-        text = self.input_box.toPlainText().strip()
-        if not text: return
-        self.add_message(text, is_user=True)
-        img = self._capture_screenshot()
-        self.start_typing()
-        self.signalr_worker.invoke_stream("SendMessage", [text, self.model_dropdown.currentText(), img])
-        self.input_box.clear()
-
-    def send_button_prompt(self, p_type):
-        if not self.started: return
-        img = self._capture_screenshot()
-        self.signalr_worker.send_screenshot(img)
-        self.add_message(self.texts[f'{p_type}_btn'], is_user=True)
-        self.start_typing()
-        
-        method = {"say": "SendAssistRequest", "followup": "SendFollowupRequest", "assist": "SendMessage"}[p_type]
-        args = [self.model_dropdown.currentText(), img]
-        if p_type == "assist": args.insert(0, self.texts['assist_btn'])
-        self.signalr_worker.invoke_stream(method, args)
-
-    def on_llm_chunk(self, chunk):
-        self.stop_typing()
-        if chunk == "[DONE]":
-            self.current_stream_msg_widget = None
-            return
-        if not self.current_stream_msg_widget:
-            self.current_stream_msg_widget = self.add_message("", False)
-            self.current_stream_text = ""
-        self.current_stream_text += chunk
-        self.current_stream_msg_widget.set_markdown(self.current_stream_text)
-        self.chat_list.scrollToBottom()
-
-    def start_typing(self):
-        if self.typing_item: return
-        label = ChatMessage("...", is_user=False)
-        self.typing_item = QListWidgetItem()
-        self.typing_item.setSizeHint(label.sizeHint())
-        self.chat_list.addItem(self.typing_item)
-        self.chat_list.setItemWidget(self.typing_item, label)
-        self.typing_thread = TypingIndicator()
-        self.typing_thread.update_signal.connect(lambda d: label.set_markdown(d))
-        self.typing_thread.start()
-        self.chat_list.scrollToBottom()
-
-    def stop_typing(self):
-        if self.typing_item:
-            self.typing_thread.stop()
-            self.chat_list.takeItem(self.chat_list.row(self.typing_item))
-            self.typing_item = None
-
-    def add_message(self, text, is_user=False):
-        widget = ChatMessage(text, is_user)
-        item = QListWidgetItem()
-        item.setSizeHint(widget.sizeHint())
-        self.chat_list.addItem(item)
-        self.chat_list.setItemWidget(item, widget)
-        self.chat_list.scrollToBottom()
-        return widget
-
     def _capture_screenshot(self):
         if self.screenshot_check.isChecked():
             try:
@@ -237,15 +273,6 @@ class ChatWindow(QMainWindow):
     def update_timer(self):
         self.elapsed = self.elapsed.addSecs(1)
         self.timer_label.setText(self.elapsed.toString('hh:mm:ss'))
-
-    def update_ui_state(self, is_started):
-        self.start_button.setVisible(not is_started)
-        self.stop_button.setVisible(is_started)
-        self.input_box.setEnabled(is_started)
-        self.say_button.setEnabled(is_started)
-        self.followup_button.setEnabled(is_started)
-        self.assist_button.setEnabled(is_started)
-        self.smart_button.setEnabled(is_started)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
