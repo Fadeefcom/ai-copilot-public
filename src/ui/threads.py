@@ -1,7 +1,7 @@
 import io
 import base64
 import threading
-import pyaudio
+import pyaudiowpatch as pyaudio
 from PIL import ImageGrab
 from PyQt6.QtCore import QThread, pyqtSignal
 from signalrcore.hub_connection_builder import HubConnectionBuilder
@@ -48,7 +48,6 @@ class SignalRWorker(QThread):
                     buf = io.BytesIO()
                     screenshot.save(buf, format="JPEG", quality=70)
                     img_str = base64.b64encode(buf.getvalue()).decode("utf-8")
-                    # Проверка перед отправкой
                     if self.is_running:
                         self.connection.send("UpdateVisualContext", [img_str])
                 except:
@@ -92,22 +91,56 @@ class AudioCaptureThread(QThread):
         self.role = role
         self.is_running = True
         self.chunk_size = 1024
-        self.rate = 16000 
 
     def run(self):
         p = pyaudio.PyAudio()
         try:
-            stream = p.open(format=pyaudio.paInt16, channels=1,
-                            rate=self.rate, input=True,
-                            frames_per_buffer=self.chunk_size)
+            device_info = None
+            if self.role == "me":
+                device_info = p.get_default_input_device_info()
+            else:
+                wasapi_info = next((p.get_host_api_info_by_index(i) 
+                                   for i in range(p.get_host_api_count()) 
+                                   if p.get_host_api_info_by_index(i)['type'] == pyaudio.paWASAPI), None)
+                if wasapi_info:
+                    default_out = p.get_device_info_by_index(wasapi_info['defaultOutputDevice'])
+                    for i in range(p.get_device_count()):
+                        dev = p.get_device_info_by_index(i)
+                        if dev["isLoopbackDevice"] and default_out["name"] in dev["name"]:
+                            device_info = dev
+                            break
+
+            if not device_info:
+                return
+
+            rate = int(device_info['defaultSampleRate'])
+            channels = device_info['maxInputChannels']
+            
+            stream = p.open(
+                format=pyaudio.paInt16,
+                channels=channels,
+                rate=rate,
+                input=True,
+                input_device_index=device_info['index'],
+                frames_per_buffer=self.chunk_size
+            )
 
             while self.is_running:
                 try:
-                    data = stream.read(self.chunk_size, exception_on_overflow=False)
-                    if data and self.is_running:
-                        self.worker.send_audio_chunk(data, self.role)
+                    raw_data = stream.read(self.chunk_size, exception_on_overflow=False)
+                    if raw_data and self.is_running:
+                        if channels > 1:
+                            mono_data = bytearray()
+                            step = channels * 2
+                            for i in range(0, len(raw_data), step):
+                                mono_data.extend(raw_data[i:i+2])
+                            processed_data = bytes(mono_data)
+                        else:
+                            processed_data = raw_data
+                        
+                        self.worker.send_audio_chunk(processed_data, self.role)
                 except:
-                    pass
+                    continue
 
             stream.stop_stream()
             stream.close()

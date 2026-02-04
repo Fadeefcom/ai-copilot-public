@@ -154,6 +154,7 @@ public class DeepgramAudioService : IDisposable
                 var transcript = e.Channel?.Alternatives?.FirstOrDefault()?.Transcript;
                 if (!string.IsNullOrWhiteSpace(transcript))
                 {
+                    _logger.LogInformation($"[Speech-to-Text] {_role}: {transcript}");
                     _ctx.AddMessage(_role, transcript);
                     _onMessage(_role, transcript);
                 }
