@@ -30,6 +30,9 @@ class SignalRWorker(QThread):
 
         while self.is_running:
             self.msleep(100)
+        
+        if self.connection:
+            self.connection.stop()
 
     def _on_open(self):
         self.status_received.emit("System: Socket Connected")
@@ -38,40 +41,49 @@ class SignalRWorker(QThread):
 
     def screenshot_context_loop(self):
         while self.is_running:
-            if self.connection:
+            if self.connection and self.is_running:
                 try:
                     screenshot = ImageGrab.grab()
                     screenshot.thumbnail((1024, 1024))
                     buf = io.BytesIO()
                     screenshot.save(buf, format="JPEG", quality=70)
                     img_str = base64.b64encode(buf.getvalue()).decode("utf-8")
-                    self.connection.send("UpdateVisualContext", [img_str])
+                    # Проверка перед отправкой
+                    if self.is_running:
+                        self.connection.send("UpdateVisualContext", [img_str])
                 except:
                     pass
             threading.Event().wait(2.0)
 
     def start_audio(self, lang):
-        if self.connection: self.connection.send("StartAudio", [lang])
+        if self.connection and self.is_running: 
+            self.connection.send("StartAudio", [lang])
 
     def stop_audio(self):
-        if self.connection: self.connection.send("StopAudio", [])
+        if self.connection: 
+            try: self.connection.send("StopAudio", [])
+            except: pass
 
     def send_audio_chunk(self, chunk, role):
-        if self.connection: self.connection.send("SendAudioChunk", [list(chunk), role])
+        if self.connection and self.is_running:
+            try: self.connection.send("SendAudioChunk", [list(chunk), role])
+            except: pass
 
     def send_screenshot(self, img_b64):
-        if self.connection: self.connection.send("UpdateVisualContext", [img_b64])
+        if self.connection and self.is_running:
+            try: self.connection.send("UpdateVisualContext", [img_b64])
+            except: pass
 
     def invoke_stream(self, method_name, args):
-        self.connection.stream(method_name, args).subscribe({
-            "next": lambda chunk: self.chunk_received.emit(str(chunk)),
-            "complete": lambda: self.chunk_received.emit("[DONE]"),
-            "error": lambda e: self.status_received.emit(f"Stream Error: {e}")
-        })
+        if self.connection and self.is_running:
+            self.connection.stream(method_name, args).subscribe({
+                "next": lambda chunk: self.chunk_received.emit(str(chunk)),
+                "complete": lambda _: self.chunk_received.emit("[DONE]"),
+                "error": lambda e: self.status_received.emit(f"Stream Error: {e}")
+            })
 
     def stop(self):
         self.is_running = False
-        if self.connection: self.connection.stop()
 
 class AudioCaptureThread(QThread):
     def __init__(self, worker, role="me"):
@@ -84,21 +96,23 @@ class AudioCaptureThread(QThread):
 
     def run(self):
         p = pyaudio.PyAudio()
-        stream = p.open(format=pyaudio.paInt16, channels=1,
-                        rate=self.rate, input=True,
-                        frames_per_buffer=self.chunk_size)
+        try:
+            stream = p.open(format=pyaudio.paInt16, channels=1,
+                            rate=self.rate, input=True,
+                            frames_per_buffer=self.chunk_size)
 
-        while self.is_running:
-            try:
-                data = stream.read(self.chunk_size, exception_on_overflow=False)
-                if data:
-                    self.worker.send_audio_chunk(data, self.role)
-            except:
-                pass
+            while self.is_running:
+                try:
+                    data = stream.read(self.chunk_size, exception_on_overflow=False)
+                    if data and self.is_running:
+                        self.worker.send_audio_chunk(data, self.role)
+                except:
+                    pass
 
-        stream.stop_stream()
-        stream.close()
-        p.terminate()
+            stream.stop_stream()
+            stream.close()
+        finally:
+            p.terminate()
 
     def stop(self):
         self.is_running = False

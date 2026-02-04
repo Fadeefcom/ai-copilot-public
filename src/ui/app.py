@@ -50,11 +50,11 @@ class ChatWindow(QMainWindow):
     
     def closeEvent(self, event):
         self.on_stop()
+        QApplication.quit()
         event.accept()
 
     def on_start(self):
         if self.started: return
-        
         self.start_button.setEnabled(False)
         self.lang_dropdown.setEnabled(False)
         self.start_button.setText("...")
@@ -68,7 +68,6 @@ class ChatWindow(QMainWindow):
     def on_socket_connected(self):
         lang = 'ru' if self.current_lang == 'ru' else 'en'
         self.signalr_worker.start_audio(lang)
-        
         self.audio_capture_thread = AudioCaptureThread(self.signalr_worker)
         self.audio_capture_thread.start()
         
@@ -79,17 +78,16 @@ class ChatWindow(QMainWindow):
         self.timer_label.setVisible(True)
 
     def on_stop(self):
-        if not self.started: return
+        self.stop_typing()
         
         if self.audio_capture_thread:
             self.audio_capture_thread.stop()
-            self.audio_capture_thread.wait()
+            self.audio_capture_thread.wait(1000)
             self.audio_capture_thread = None
-            
+
         if self.signalr_worker:
-            self.signalr_worker.stop_audio()
             self.signalr_worker.stop()
-            self.signalr_worker.wait()
+            self.signalr_worker.wait(1000)
             self.signalr_worker = None
 
         self.started = False
@@ -97,7 +95,6 @@ class ChatWindow(QMainWindow):
         self.lang_dropdown.setEnabled(True)
         self.timer.stop()
         self.timer_label.setVisible(False)
-        self.add_message("System: Socket Disconnected.", False)
 
     def send_message(self):
         if not self.started: return
@@ -141,15 +138,20 @@ class ChatWindow(QMainWindow):
         self.typing_item.setSizeHint(label.sizeHint())
         self.chat_list.addItem(self.typing_item)
         self.chat_list.setItemWidget(self.typing_item, label)
+        
         self.typing_thread = TypingIndicator()
         self.typing_thread.update_signal.connect(lambda d: label.set_markdown(d))
         self.typing_thread.start()
         self.chat_list.scrollToBottom()
 
     def stop_typing(self):
-        if self.typing_item:
-            self.typing_thread.stop()
-            self.chat_list.takeItem(self.chat_list.row(self.typing_item))
+        if hasattr(self, 'typing_item') and self.typing_item:
+            if hasattr(self, 'typing_thread'):
+                self.typing_thread.stop()
+                self.typing_thread.wait()
+            row = self.chat_list.row(self.typing_item)
+            if row >= 0:
+                self.chat_list.takeItem(row)
             self.typing_item = None
 
     def add_message(self, text, is_user=False):
