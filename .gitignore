@@ -14,3 +14,4 @@ src/CopilotBackend/CopilotBackend.ServiceDefaults/bin
 src/CopilotBackend/CopilotBackend.ApiService/log.txt
 .env
 src/CopilotBackend/CopilotBackend.ApiService/appsettings.Production.json
+src/CopilotBackend/CopilotBackend.ApiService/logs

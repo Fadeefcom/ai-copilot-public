@@ -2,10 +2,7 @@
 using Deepgram;
 using Deepgram.Models.Listen.v2.WebSocket;
 using Microsoft.Extensions.Options;
-using NAudio.CoreAudioApi;
-using NAudio.Wave;
 using System.Text;
-using System.Threading.Tasks.Dataflow;
 
 namespace CopilotBackend.ApiService.Services;
 
@@ -22,7 +19,7 @@ public class DeepgramAudioService : IDisposable
     private readonly StringBuilder _smartModeBuffer = new();
     private readonly object _smartModeLock = new();
 
-    private readonly List<AudioStreamer> _streamers = new();
+    private readonly Dictionary<SpeakerRole, AudioStreamer> _streamers = new();
 
     public bool IsRunning => _streamers.Any();
 
@@ -43,34 +40,41 @@ public class DeepgramAudioService : IDisposable
 
         try
         {
-            var micStreamer = new AudioStreamer(_apiKey, _logger, _contextService, OnMessageReceived);
-            await micStreamer.InitializeAsync(SpeakerRole.Me, language, DataFlow.Capture);
-            _streamers.Add(micStreamer);
-
-            var speakerStreamer = new AudioStreamer(_apiKey, _logger, _contextService, OnMessageReceived);
-            await speakerStreamer.InitializeAsync(SpeakerRole.Companion, language, DataFlow.Render);
-            _streamers.Add(speakerStreamer);
-
-            _logger.LogInformation("Audio services started.");
+            var roles = new[] { SpeakerRole.Me, SpeakerRole.Companion };
+            foreach (var role in roles)
+            {
+                var streamer = new AudioStreamer(_apiKey, _logger, _contextService, role, OnMessageReceived);
+                await streamer.ConnectAsync(language);
+                _streamers[role] = streamer;
+            }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to start audio services");
+            _logger.LogError(ex, "Failed to start audio proxy service");
             await StopAsync();
             throw;
         }
     }
 
+    public Task PushAudio(SpeakerRole role, byte[] data)
+    {
+        if (_streamers.TryGetValue(role, out var streamer))
+        {
+            streamer.SendAudio(data);
+        }
+
+        return Task.CompletedTask;
+    }
+
     public async Task StopAsync()
     {
         _cts?.Cancel();
-        foreach (var streamer in _streamers)
+        foreach (var streamer in _streamers.Values)
         {
             await streamer.StopAsync();
             streamer.Dispose();
         }
         _streamers.Clear();
-        _logger.LogInformation("Audio services stopped.");
     }
 
     private void OnMessageReceived(SpeakerRole role, string text)
@@ -107,15 +111,11 @@ public class DeepgramAudioService : IDisposable
         lock (_bufferLock)
         {
             var text = _companionBuffer.ToString();
-
             int questionIndex = text.IndexOf('?');
-
             if (questionIndex != -1)
             {
                 var question = text.Substring(0, questionIndex + 1).Trim();
-
                 _companionBuffer.Clear();
-
                 return question;
             }
         }
@@ -130,38 +130,35 @@ public class DeepgramAudioService : IDisposable
         _cts?.Dispose();
     }
 
-    protected class AudioStreamer : IDisposable
+    private class AudioStreamer : IDisposable
     {
         private readonly ListenWebSocketClient _client;
         private readonly ConversationContextService _ctx;
         private readonly Action<SpeakerRole, string> _onMessage;
         private readonly ILogger _logger;
-        private WasapiCapture? _capture;
-        private readonly string _apiKey;
+        private readonly SpeakerRole _role;
 
-        public AudioStreamer(string apiKey, ILogger logger, ConversationContextService ctx, Action<SpeakerRole, string> onMessage)
+        public AudioStreamer(string apiKey, ILogger logger, ConversationContextService ctx, SpeakerRole role, Action<SpeakerRole, string> onMessage)
         {
-            _apiKey = apiKey;
             _ctx = ctx;
-            _client = new ListenWebSocketClient(_apiKey);
+            _client = new ListenWebSocketClient(apiKey);
             _logger = logger;
+            _role = role;
             _onMessage = onMessage;
         }
 
-        public async Task InitializeAsync(SpeakerRole role, string language, DataFlow dataFlow)
+        public async Task ConnectAsync(string language)
         {
             await _client.Subscribe((_, e) =>
             {
                 var transcript = e.Channel?.Alternatives?.FirstOrDefault()?.Transcript;
                 if (!string.IsNullOrWhiteSpace(transcript))
                 {
-                    _ctx.AddMessage(role, transcript);
-                    _logger.LogInformation($"{role} - {transcript}");
-                    _onMessage(role, transcript);
+                    _ctx.AddMessage(_role, transcript);
+                    _onMessage(_role, transcript);
                 }
             });
 
-            // Подключение
             var schema = new LiveSchema
             {
                 Model = "nova-2",
@@ -173,41 +170,21 @@ public class DeepgramAudioService : IDisposable
                 InterimResults = false
             };
             await _client.Connect(schema);
+        }
 
-            // Захват аудио
-            var enumerator = new MMDeviceEnumerator();
-            var device = enumerator.GetDefaultAudioEndpoint(dataFlow, Role.Console);
-
-            if (device != null)
-            {
-                _capture = dataFlow == DataFlow.Render
-                    ? new WasapiLoopbackCapture(device) { WaveFormat = new WaveFormat(16000, 16, 1) }
-                    : new WasapiCapture(device) { WaveFormat = new WaveFormat(16000, 16, 1) };
-
-                _capture.DataAvailable += (_, e) =>
-                {
-                    if (e.BytesRecorded > 0)
-                    {
-                        var buffer = new byte[e.BytesRecorded];
-                        Array.Copy(e.Buffer, buffer, e.BytesRecorded);
-                        _client.SendBinary(buffer);
-                    }
-                };
-                _capture.StartRecording();
-            }
+        public void SendAudio(byte[] buffer)
+        {
+            _client.SendBinary(buffer);
         }
 
         public async Task StopAsync()
         {
-            _capture?.StopRecording();
             await _client.Stop();
         }
 
         public void Dispose()
         {
-            _capture?.Dispose();
             _client.Dispose();
         }
     }
 }
-

@@ -133,6 +133,18 @@ public class PromptManager
         return systemPrompt.ToString();
     }
 
+    public async Task<string> GetAssistPromt()
+    {
+        var systemPrompt = await LoadPromptAsync(_assistPromptFile);
+        return systemPrompt.ToString();
+    }
+
+    public async Task<string> GetFollowupPromt()
+    {
+        var systemPrompt = await LoadPromptAsync(_followupPromptFile);
+        return systemPrompt.ToString();
+    }
+
     private async Task<string> LoadPromptAsync(string fileName)
     {
         var path = Path.Combine(_promptsFolder, fileName);

@@ -1,4 +1,5 @@
 ﻿using CopilotBackend.ApiService.Abstractions;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace CopilotBackend.ApiService.Services.Ai;
 
@@ -147,12 +148,32 @@ public class AiOrchestrator
         }
     }
 
-    public async IAsyncEnumerable<string> StreamResponseWithVisionAsync(string modelName, string prompt, string? base64Image)
+    public IAsyncEnumerable<string> StreamSmartActionAsync(AiActionType actionType, string modelName, string? base64Image, string? userText = null)
+    {
+        return actionType switch
+        {
+            AiActionType.Assist => StreamActionWithPrompt(modelName, base64Image, _promptManager.GetAssistPromt()),
+            AiActionType.Followup => StreamActionWithPrompt(modelName, base64Image, _promptManager.GetFollowupPromt()),
+            _ => StreamResponseWithVisionAsync(modelName, userText ?? "", base64Image)
+        };
+    }
+
+    private async IAsyncEnumerable<string> StreamActionWithPrompt(string modelName, string? base64Image, Task<string> promptTask)
+    {
+        var prompt = await promptTask;
+        await foreach (var chunk in StreamResponseWithVisionAsync(modelName, prompt, base64Image))
+        {
+            yield return chunk;
+        }
+    }
+
+    private async IAsyncEnumerable<string> StreamResponseWithVisionAsync(string modelName, string prompt, string? base64Image)
     {
         var name = modelName.Split(' ')[0];
         var version = modelName.Split(' ')[1];
         var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
         if (provider == null) yield break;
+
 
         var systemPrompt = await _promptManager.GetSystemPrompt();
 
@@ -166,5 +187,12 @@ public class AiOrchestrator
         {
             yield return chunk;
         }
+    }
+
+    public enum AiActionType
+    {
+        System,
+        Assist,
+        Followup
     }
 }

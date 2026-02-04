@@ -21,70 +21,65 @@ public class SmartHub : Hub
         _logger = logger;
     }
 
-    public void UpdateVisualContext(string base64Image)
+    public async Task StartAudio(string language) => await _audioService.StartAsync(language);
+
+    public async Task StopAudio() => await _audioService.StopAsync();
+
+    public void SendAudioChunk(byte[] chunk, string role)
     {
-        _latestScreenshots[Context.ConnectionId] = base64Image;
+        var speakerRole = role.ToLower() == "me" ? SpeakerRole.Me : SpeakerRole.Companion;
+        _audioService.PushAudio(speakerRole, chunk);
     }
 
-    public async IAsyncEnumerable<string> StreamSmartMode(string modelName, [EnumeratorCancellation] CancellationToken cancellationToken)
+    public void UpdateVisualContext(string base64Image) => _latestScreenshots[Context.ConnectionId] = base64Image;
+
+    public async IAsyncEnumerable<string> SendMessage(string text, string model, string? image, [EnumeratorCancellation] CancellationToken ct)
     {
-        _logger.LogInformation($"[SmartHub] Started for {Context.ConnectionId}");
-        yield return "Smart Mode: Active (Voice + Vision). Listening...";
+        var chunks = _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.System, model, image, text);
+        await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
+    }
 
+    public async IAsyncEnumerable<string> SendAssistRequest(string model, string? image, [EnumeratorCancellation] CancellationToken ct)
+    {
+        var chunks = _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.Assist, model, image);
+        await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
+    }
+
+    public async IAsyncEnumerable<string> SendFollowupRequest(string model, string? image, [EnumeratorCancellation] CancellationToken ct)
+    {
+        var chunks = _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.Followup, model, image);
+        await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
+    }
+
+    public async IAsyncEnumerable<string> StreamSmartMode(string modelName, [EnumeratorCancellation] CancellationToken ct)
+    {
+        _logger.LogInformation($"[SmartHub] Smart Mode started: {Context.ConnectionId}");
         var buffer = new StringBuilder();
-        var lastCheckTime = DateTime.UtcNow;
 
-        while (!cancellationToken.IsCancellationRequested)
+        while (!ct.IsCancellationRequested)
         {
             var newText = _audioService.PopNewText();
+            if (!string.IsNullOrWhiteSpace(newText)) buffer.Append(" ").Append(newText);
 
-            if (!string.IsNullOrWhiteSpace(newText))
+            if (buffer.Length > 20)
             {
-                buffer.Append(" ").Append(newText);
-            }
-
-            var bufferLength = buffer.Length;
-            var timeSinceLastCheck = DateTime.UtcNow - lastCheckTime;
-
-            bool shouldCheck = bufferLength > 50 || (bufferLength > 20 && timeSinceLastCheck.TotalSeconds > 2.5);
-
-            if (shouldCheck)
-            {
-                var currentTranscript = buffer.ToString().Trim();
-
-                if (!string.IsNullOrWhiteSpace(currentTranscript))
+                var detectedIssue = await _orchestrator.DetectQuestionAsync(modelName, buffer.ToString());
+                if (detectedIssue != null)
                 {
-                    var detectedIssue = await _orchestrator.DetectQuestionAsync(modelName, currentTranscript);
-
-                    if (detectedIssue != null)
-                    {
-                        yield return $"[System] Detected intent: \"{detectedIssue}\"";
-
-                        _latestScreenshots.TryGetValue(Context.ConnectionId, out var base64Image);
-
-                        await foreach (var chunk in _orchestrator.StreamResponseWithVisionAsync(modelName, detectedIssue, base64Image)
-                                           .WithCancellation(cancellationToken))
-                        {
-                            yield return chunk;
-                        }
-
-                        yield return "[System] Response complete.";
-
-                        buffer.Clear();
-                    }
-                }
-
-                lastCheckTime = DateTime.UtcNow;
-
-                if (buffer.Length > 2000)
-                {
-                    buffer.Remove(0, buffer.Length - 500);
+                    yield return $"[System] Intent: {detectedIssue}";
+                    _latestScreenshots.TryGetValue(Context.ConnectionId, out var img);
+                    await foreach (var chunk in _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.System, modelName, img, detectedIssue).WithCancellation(ct))
+                        yield return chunk;
+                    buffer.Clear();
                 }
             }
-
-            await Task.Delay(250, cancellationToken);
+            await Task.Delay(500, ct);
         }
+    }
 
+    public override Task OnDisconnectedAsync(Exception? exception)
+    {
         _latestScreenshots.TryRemove(Context.ConnectionId, out _);
+        return base.OnDisconnectedAsync(exception);
     }
 }
