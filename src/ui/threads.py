@@ -1,6 +1,7 @@
 import io
 import base64
 import threading
+import numpy as np
 import pyaudiowpatch as pyaudio
 from PIL import ImageGrab
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -17,6 +18,7 @@ class SignalRWorker(QThread):
         self.model_name = model_name
         self.connection = None
         self.is_running = True
+        self.screenshots_enabled = False
 
     def run(self):
         hub_url = HUB_URL.replace("http", "ws", 1) if HUB_URL.startswith("http") else HUB_URL
@@ -41,7 +43,7 @@ class SignalRWorker(QThread):
 
     def screenshot_context_loop(self):
         while self.is_running:
-            if self.connection and self.is_running:
+            if self.connection and self.is_running and self.screenshots_enabled:
                 try:
                     screenshot = ImageGrab.grab()
                     screenshot.thumbnail((1024, 1024))
@@ -64,16 +66,14 @@ class SignalRWorker(QThread):
             except: pass
 
     def send_audio_chunk(self, chunk, role):
-        print(f"Sending chunk: {len(chunk)}")
         if self.connection and self.is_running:
             try:
                 encoded = base64.b64encode(chunk).decode('utf-8')
                 self.connection.send("SendAudioChunk", [encoded, role])
-            except Exception as e:
-                print(f"Error sending: {e}")
+            except:
+                pass
 
     def send_screenshot(self, img_b64):
-        print(f"Sending screenshot: {len(img_b64)} chars")
         if self.connection and self.is_running:
             try: self.connection.send("UpdateVisualContext", [img_b64])
             except: pass
@@ -88,6 +88,16 @@ class SignalRWorker(QThread):
 
     def stop(self):
         self.is_running = False
+        
+        if self.connection:
+            try:
+                self.connection.send("StopAudio", [])
+                self.msleep(200) 
+                self.connection.stop()
+            except:
+                pass
+        
+        self.status_received.emit("System: Socket Disconnected")
 
 class AudioCaptureThread(QThread):
     def __init__(self, worker, role="me"):
@@ -95,7 +105,7 @@ class AudioCaptureThread(QThread):
         self.worker = worker
         self.role = role
         self.is_running = True
-        self.chunk_size = 1024
+        self.chunk_size = 2048
 
     def run(self):
         p = pyaudio.PyAudio()
@@ -118,13 +128,14 @@ class AudioCaptureThread(QThread):
             if not device_info:
                 return
 
-            rate = int(device_info['defaultSampleRate'])
-            channels = device_info['maxInputChannels']
+            native_rate = int(device_info['defaultSampleRate'])
+            channels = int(device_info['maxInputChannels'])
+            target_rate = 16000
             
             stream = p.open(
                 format=pyaudio.paInt16,
-                channels=1,
-                rate=16000,
+                channels=channels,
+                rate=native_rate,
                 input=True,
                 input_device_index=device_info['index'],
                 frames_per_buffer=self.chunk_size
@@ -133,9 +144,31 @@ class AudioCaptureThread(QThread):
             while self.is_running:
                 try:
                     raw_data = stream.read(self.chunk_size, exception_on_overflow=False)
-                    if raw_data and self.is_running:
-                        self.worker.send_audio_chunk(raw_data, self.role)
-                except:
+                    if not raw_data:
+                        continue
+                    
+                    audio_np = np.frombuffer(raw_data, dtype=np.int16).copy()
+                    
+                    if channels > 1:
+                        audio_np = audio_np[::channels]
+                    
+                    if np.abs(audio_np).max() == 0:
+                        continue
+
+                    if native_rate != target_rate:
+                        duration = len(audio_np) / native_rate
+                        num_target_samples = int(duration * target_rate)                        
+                        audio_resampled = np.interp(
+                            np.linspace(0, 1, num_target_samples),
+                            np.linspace(0, 1, len(audio_np)),
+                            audio_np
+                        ).astype(np.int16)
+                        
+                        self.worker.send_audio_chunk(audio_resampled.tobytes(), self.role)
+                    else:
+                        self.worker.send_audio_chunk(audio_np.tobytes(), self.role)
+                except Exception as e:
+                    print(f"Capture error: {e}")
                     continue
 
             stream.stop_stream()

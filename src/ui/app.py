@@ -69,8 +69,12 @@ class ChatWindow(QMainWindow):
         selected_lang = self.lang_dropdown.currentText()
         lang = 'ru' if selected_lang == 'ru' else 'en'
         self.signalr_worker.start_audio(lang)
-        self.audio_capture_thread = AudioCaptureThread(self.signalr_worker)
-        self.audio_capture_thread.start()
+        
+        self.mic_thread = AudioCaptureThread(self.signalr_worker, role="me")
+        self.mic_thread.start()
+
+        self.speaker_thread = AudioCaptureThread(self.signalr_worker, role="companion")
+        self.speaker_thread.start()
         
         self.started = True
         self.start_button.setText(self.texts['start'])
@@ -81,10 +85,15 @@ class ChatWindow(QMainWindow):
     def on_stop(self):
         self.stop_typing()
         
-        if self.audio_capture_thread:
-            self.audio_capture_thread.stop()
-            self.audio_capture_thread.wait(1000)
-            self.audio_capture_thread = None
+        if hasattr(self, 'mic_thread') and self.mic_thread:
+            self.mic_thread.stop()
+            self.mic_thread.wait(500)
+            self.mic_thread = None
+
+        if hasattr(self, 'speaker_thread') and self.speaker_thread:
+            self.speaker_thread.stop()
+            self.speaker_thread.wait(500)
+            self.speaker_thread = None
 
         if self.signalr_worker:
             self.signalr_worker.stop()
@@ -95,6 +104,8 @@ class ChatWindow(QMainWindow):
         self.update_ui_state(False)
         self.lang_dropdown.setEnabled(True)
         self.timer.stop()
+        self.elapsed = QTime(0, 0, 0) # Сброс таймера
+        self.timer_label.setText('00:00:00')
         self.timer_label.setVisible(False)
 
     def send_message(self):
@@ -173,6 +184,10 @@ class ChatWindow(QMainWindow):
         self.followup_button.setEnabled(is_started)
         self.assist_button.setEnabled(is_started)
         self.smart_button.setEnabled(is_started)
+    
+    def _update_screenshot_status(self):
+        if self.signalr_worker:
+            self.signalr_worker.screenshots_enabled = self.screenshot_check.isChecked()
 
     def _init_ui(self):
         central_widget = QWidget()
@@ -207,6 +222,7 @@ class ChatWindow(QMainWindow):
         top_layout.addLayout(center_box)
 
         self.screenshot_check = QCheckBox("Screenshots")
+        self.screenshot_check.stateChanged.connect(self._update_screenshot_status)
         self.screenshot_check.setStyleSheet("color: #AAAAAA; margin-right: 10px;")
         top_layout.addWidget(self.screenshot_check)
         

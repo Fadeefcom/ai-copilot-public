@@ -69,12 +69,22 @@ public class DeepgramAudioService : IDisposable
     public async Task StopAsync()
     {
         _cts?.Cancel();
+
         foreach (var streamer in _streamers.Values)
         {
-            await streamer.StopAsync();
-            streamer.Dispose();
+            try
+            {
+                await streamer.StopAsync().WaitAsync(TimeSpan.FromSeconds(2));
+                streamer.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Graceful stop of Deepgram streamer failed: {Message}", ex.Message);
+            }
         }
+
         _streamers.Clear();
+        _logger.LogInformation("Audio services stopped.");
     }
 
     private void OnMessageReceived(SpeakerRole role, string text)
