@@ -21,12 +21,26 @@ public class SmartHub : Hub
         _logger = logger;
     }
 
-    public async Task StartAudio(string language) => await _audioService.StartAsync(language);
+    public async Task StartAudio(string language)
+    {
+        try
+        {
+            await _audioService.StartAsync(language);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to start audio");
+            throw;
+        }
+    }
 
     public async Task StopAudio() => await _audioService.StopAsync();
 
-    public void SendAudioChunk(byte[] chunk, string role)
+    public void SendAudioChunk(string base64Chunk, string role)
     {
+        if (string.IsNullOrEmpty(base64Chunk)) return;
+
+        var chunk = Convert.FromBase64String(base64Chunk);
         var speakerRole = role.ToLower() == "me" ? SpeakerRole.Me : SpeakerRole.Companion;
         _audioService.PushAudio(speakerRole, chunk);
     }

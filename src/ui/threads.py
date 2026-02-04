@@ -64,11 +64,16 @@ class SignalRWorker(QThread):
             except: pass
 
     def send_audio_chunk(self, chunk, role):
+        print(f"Sending chunk: {len(chunk)}")
         if self.connection and self.is_running:
-            try: self.connection.send("SendAudioChunk", [list(chunk), role])
-            except: pass
+            try:
+                encoded = base64.b64encode(chunk).decode('utf-8')
+                self.connection.send("SendAudioChunk", [encoded, role])
+            except Exception as e:
+                print(f"Error sending: {e}")
 
     def send_screenshot(self, img_b64):
+        print(f"Sending screenshot: {len(img_b64)} chars")
         if self.connection and self.is_running:
             try: self.connection.send("UpdateVisualContext", [img_b64])
             except: pass
@@ -118,8 +123,8 @@ class AudioCaptureThread(QThread):
             
             stream = p.open(
                 format=pyaudio.paInt16,
-                channels=channels,
-                rate=rate,
+                channels=1,
+                rate=16000,
                 input=True,
                 input_device_index=device_info['index'],
                 frames_per_buffer=self.chunk_size
@@ -129,16 +134,7 @@ class AudioCaptureThread(QThread):
                 try:
                     raw_data = stream.read(self.chunk_size, exception_on_overflow=False)
                     if raw_data and self.is_running:
-                        if channels > 1:
-                            mono_data = bytearray()
-                            step = channels * 2
-                            for i in range(0, len(raw_data), step):
-                                mono_data.extend(raw_data[i:i+2])
-                            processed_data = bytes(mono_data)
-                        else:
-                            processed_data = raw_data
-                        
-                        self.worker.send_audio_chunk(processed_data, self.role)
+                        self.worker.send_audio_chunk(raw_data, self.role)
                 except:
                     continue
 

@@ -66,7 +66,8 @@ class ChatWindow(QMainWindow):
         self.signalr_worker.start()
 
     def on_socket_connected(self):
-        lang = 'ru' if self.current_lang == 'ru' else 'en'
+        selected_lang = self.lang_dropdown.currentText()
+        lang = 'ru' if selected_lang == 'ru' else 'en'
         self.signalr_worker.start_audio(lang)
         self.audio_capture_thread = AudioCaptureThread(self.signalr_worker)
         self.audio_capture_thread.start()
