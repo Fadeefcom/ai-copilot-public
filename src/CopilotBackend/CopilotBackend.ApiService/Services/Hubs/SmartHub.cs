@@ -1,4 +1,5 @@
-﻿using CopilotBackend.ApiService.Services.Ai;
+﻿using CopilotBackend.ApiService.Abstractions;
+using CopilotBackend.ApiService.Services.Ai;
 using Microsoft.AspNetCore.SignalR;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
@@ -9,12 +10,12 @@ namespace CopilotBackend.ApiService.Services.Hubs;
 public class SmartHub : Hub
 {
     private readonly AiOrchestrator _orchestrator;
-    private readonly DeepgramAudioService _audioService;
+    private readonly IAudioTranscriptionService _audioService;
     private readonly ILogger<SmartHub> _logger;
 
     private static readonly ConcurrentDictionary<string, string> _latestScreenshots = new();
 
-    public SmartHub(AiOrchestrator orchestrator, DeepgramAudioService audioService, ILogger<SmartHub> logger)
+    public SmartHub(AiOrchestrator orchestrator, IAudioTranscriptionService audioService, ILogger<SmartHub> logger)
     {
         _orchestrator = orchestrator;
         _audioService = audioService;

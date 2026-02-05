@@ -1,4 +1,5 @@
-﻿using CopilotBackend.ApiService.Services;
+﻿using CopilotBackend.ApiService.Abstractions;
+using CopilotBackend.ApiService.Services;
 using CopilotBackend.ApiService.Services.Ai;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
@@ -55,13 +56,13 @@ public static class RouteExtensions
             }
         });
 
-        api.MapPost("/audio/start", async ([FromServices] DeepgramAudioService svc, [FromQuery] string language = "ru") =>
+        api.MapPost("/audio/start", async ([FromServices] IAudioTranscriptionService svc, [FromQuery] string language = "ru") =>
         {
             await svc.StartAsync(language);
             return Results.Ok(new { status = "started" });
         });
 
-        api.MapPost("/audio/stop", async ([FromServices] DeepgramAudioService svc) =>
+        api.MapPost("/audio/stop", async ([FromServices] IAudioTranscriptionService svc) =>
         {
             await svc.StopAsync();
             svc.Clear();

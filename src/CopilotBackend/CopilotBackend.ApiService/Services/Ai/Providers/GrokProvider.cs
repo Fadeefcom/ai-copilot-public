@@ -17,11 +17,11 @@ public class GrokProvider : ILlmProvider
     public GrokProvider(
         IGrokApi api,
         ILogger<GrokProvider> logger,
-        IOptions<AiOptions> options)
+        IOptions<ExternalAiOptions> options)
     {
         _api = api;
         _logger = logger;
-        //_apiKey = $"Bearer {options.Value.GroqApiKey}";
+        _apiKey = $"Bearer {options.Value.GroqApiKey}";
         _defaultModel = "grok-beta";
     }
 

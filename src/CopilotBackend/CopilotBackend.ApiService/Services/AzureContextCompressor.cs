@@ -7,12 +7,10 @@ namespace CopilotBackend.ApiService.Services;
 public class AzureContextCompressor : IContextCompressor
 {
     private readonly ILlmProvider _llmProvider;
-    private readonly string _model;
 
     public AzureContextCompressor(IEnumerable<ILlmProvider> providers, IOptions<AiOptions> options)
     {
         _llmProvider = providers.First(p => p.ProviderName == "Azure");
-        _model = options.Value.FastDeployment;
     }
 
     public async Task<string> SummarizeContextAsync(string fullTranscript)
@@ -23,11 +21,11 @@ public class AzureContextCompressor : IContextCompressor
                            "The summary must be brief, neutral, and delivered in a business-like style without any conversational preamble.";
 
         var messages = new List<ChatMessage>
-    {
-        new(ChatRole.System, systemPrompt),
-        new(ChatRole.User, $"TRANSCRIPT:\n{fullTranscript}")
-    };
+        {
+            new(ChatRole.System, systemPrompt),
+            new(ChatRole.User, $"TRANSCRIPT:\n{fullTranscript}")
+        };
 
-        return await _llmProvider.GenerateResponseAsync(messages, _model);
+        return await _llmProvider.GenerateResponseAsync(messages, "fast");
     }
 }

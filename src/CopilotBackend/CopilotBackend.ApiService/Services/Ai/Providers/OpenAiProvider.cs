@@ -21,11 +21,11 @@ public class OpenAiProvider : ILlmProvider
     public OpenAiProvider(
         IOpenAiApi api,
         ILogger<OpenAiProvider> logger,
-        IOptions<AiOptions> options)
+        IOptions<ExternalAiOptions> options)
     {
         _api = api;
         _logger = logger;
-        //_apiKey = $"Bearer {options.Value.OpenAiApiKey}";
+        _apiKey = $"Bearer {options.Value.OpenAiApiKey}";
     }
 
     public string ProviderName => "OpenAI";

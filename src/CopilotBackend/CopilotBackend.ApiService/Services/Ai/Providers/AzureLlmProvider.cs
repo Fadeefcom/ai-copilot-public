@@ -43,8 +43,8 @@ public class AzureLlmProvider : ILlmProvider
         }
 
         var deployment = GetDeploymentName(model);
-        var url = $"{_options.Endpoint}/openai/deployments/{deployment}/chat/completions?api-version=2024-08-01-preview";
-        var payload = CreatePayload(currentMessages, deployment, false, null);
+        var url = deployment.Endpoint;
+        var payload = CreatePayload(currentMessages, deployment.Name, false, null);
 
         return await SendRequestAsync(url, payload, ct);
     }
@@ -69,8 +69,8 @@ public class AzureLlmProvider : ILlmProvider
         }
 
         var deployment = GetDeploymentName(model);
-        var url = $"{_options.Endpoint}/openai/deployments/{deployment}/chat/completions?api-version=2024-08-01-preview";
-        var payload = CreatePayload(currentMessages, deployment, true, null);
+        var url = deployment.Endpoint;
+        var payload = CreatePayload(currentMessages, deployment.Name, true, null);
 
         await foreach (var chunk in ExecuteStreamRequestAsync(url, payload, ct).WithCancellation(ct))
         {
@@ -166,11 +166,12 @@ public class AzureLlmProvider : ILlmProvider
         return payload;
     }
 
-    private string GetDeploymentName(string model) => model.ToLower() switch
+    private DeploymentOptions GetDeploymentName(string model) => model.ToLower() switch
     {
         "thinking" => _options.ReasoningDeployment,
         "fast" => _options.FastDeployment,
         "vision" => _options.VisionDeployment,
-        _ => model
+        "chat" => _options.ChatDeployment,
+        _ => _options.ChatDeployment
     };
 }

@@ -1,4 +1,5 @@
-﻿using CopilotBackend.ApiService.Configuration;
+﻿using CopilotBackend.ApiService.Abstractions;
+using CopilotBackend.ApiService.Configuration;
 using Deepgram;
 using Deepgram.Models.Listen.v2.WebSocket;
 using Microsoft.Extensions.Options;
@@ -6,7 +7,7 @@ using System.Text;
 
 namespace CopilotBackend.ApiService.Services;
 
-public class DeepgramAudioService : IDisposable
+public class DeepgramAudioService : IAudioTranscriptionService
 {
     private readonly ConversationContextService _contextService;
     private readonly string _apiKey;
@@ -24,7 +25,7 @@ public class DeepgramAudioService : IDisposable
     public bool IsRunning => _streamers.Any();
 
     public DeepgramAudioService(
-        IOptions<AiOptions> options,
+        IOptions<ExternalAiOptions> options,
         ILogger<DeepgramAudioService> logger,
         ConversationContextService contextService)
     {

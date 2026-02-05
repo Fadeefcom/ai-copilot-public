@@ -53,7 +53,7 @@ public class Program
         });
 
         builder.Services.AddSingleton<ConversationContextService>();
-        builder.Services.AddSingleton<DeepgramAudioService>();
+        builder.Services.AddSingleton<IAudioTranscriptionService, DeepgramAudioService>();
         builder.Services.AddTransient<ContextManager>();
         builder.Services.AddTransient<IContextCompressor, AzureContextCompressor>();
 

@@ -7,13 +7,13 @@ public class AiOrchestrator
     private readonly IEnumerable<ILlmProvider> _providers;
     private readonly PromptManager _promptManager;
     private readonly ContextManager _contextManager;
-    private readonly DeepgramAudioService _audioService;
+    private readonly IAudioTranscriptionService _audioService;
 
     public AiOrchestrator(
         IEnumerable<ILlmProvider> providers,
         PromptManager promptManager,
         ContextManager contextManager,
-        DeepgramAudioService audioService)
+        IAudioTranscriptionService audioService)
     {
         _providers = providers;
         _promptManager = promptManager;
