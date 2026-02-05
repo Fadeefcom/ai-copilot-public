@@ -60,6 +60,7 @@ public class Program
         builder.Services.AddTransient<PromptManager>();
         builder.Services.AddTransient<AiOrchestrator>();
         builder.Services.AddTransient<ILlmProvider, AzureLlmProvider>();
+        builder.Services.AddSingleton<LatencyMonitor>();
 
         var app = builder.Build();
 

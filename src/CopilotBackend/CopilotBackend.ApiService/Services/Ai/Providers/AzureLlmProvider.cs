@@ -1,6 +1,7 @@
 ﻿using CopilotBackend.ApiService.Abstractions;
 using CopilotBackend.ApiService.Configuration;
 using Microsoft.Extensions.Options;
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -13,12 +14,14 @@ public class AzureLlmProvider : ILlmProvider
     private readonly HttpClient _http;
     private readonly AiOptions _options;
     private readonly ILogger<AzureLlmProvider> _logger;
+    private readonly LatencyMonitor _latencyMonitor;
 
-    public AzureLlmProvider(HttpClient http, IOptions<AiOptions> options, ILogger<AzureLlmProvider> logger)
+    public AzureLlmProvider(HttpClient http, IOptions<AiOptions> options, ILogger<AzureLlmProvider> logger, LatencyMonitor latencyMonitor)
     {
         _http = http;
         _options = options.Value;
         _logger = logger;
+        _latencyMonitor = latencyMonitor;
     }
 
     public string ProviderName => "Azure";
@@ -85,7 +88,12 @@ public class AzureLlmProvider : ILlmProvider
         request.Headers.Add("api-key", _options.ApiKey);
         request.Content = JsonContent.Create(payload);
 
+        var sw = Stopwatch.StartNew();
         using var response = await _http.SendAsync(request, ct);
+        sw.Stop();
+
+        _latencyMonitor.Record(sw.ElapsedMilliseconds);
+
         response.EnsureSuccessStatusCode();
 
         var result = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
@@ -98,7 +106,12 @@ public class AzureLlmProvider : ILlmProvider
         request.Headers.Add("api-key", _options.ApiKey);
         request.Content = JsonContent.Create(payload);
 
+        var sw = Stopwatch.StartNew();
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        sw.Stop();
+
+        _latencyMonitor.Record(sw.ElapsedMilliseconds);
+
         if (!response.IsSuccessStatusCode)
         {
             var error = await response.Content.ReadAsStringAsync(ct);
@@ -197,7 +210,11 @@ public class AzureLlmProvider : ILlmProvider
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
         request.Content = JsonContent.Create(payload);
 
+        var sw = Stopwatch.StartNew();
         using var response = await _http.SendAsync(request, ct);
+        sw.Stop();
+
+        _latencyMonitor.Record(sw.ElapsedMilliseconds);
 
         if (!response.IsSuccessStatusCode)
         {

@@ -86,7 +86,7 @@ class ChatMessage(QFrame):
         if self.is_user:
             self.label.setMaximumWidth(int(new_width * 0.75))
         elif self.is_system:
-            self.label.setFixedWidth(new_width)
+            self.label.setFixedWidth(int(new_width * 0.1))
         else:
             self.label.setFixedWidth(new_width)
         

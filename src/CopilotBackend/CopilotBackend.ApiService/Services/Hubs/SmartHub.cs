@@ -81,7 +81,7 @@ public class SmartHub : Hub
                 var detectedIssue = await _orchestrator.DetectQuestionAsync(modelName, buffer.ToString());
                 if (detectedIssue != null)
                 {
-                    yield return $"[System] Intent: {detectedIssue}";
+                    _logger.LogInformation($"[System] Intent: {detectedIssue}");
                     _latestScreenshots.TryGetValue(Context.ConnectionId, out var img);
                     await foreach (var chunk in _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.System, modelName, img, detectedIssue).WithCancellation(ct))
                         yield return chunk;

@@ -40,9 +40,14 @@ public static class RouteExtensions
             return Results.Ok(models);
         }).WithName("GetLlmModels");
 
-        api.MapGet("/latency", () =>
+        api.MapGet("/latency", (LatencyMonitor monitor) =>
         {
-            return Results.Ok("42ms");
+            var avg = monitor.GetAverageLatency();
+            return Results.Ok(new
+            {
+                average_latency_ms = avg,
+                formatted = $"{avg:F2}ms"
+            });
         });
 
         api.MapGet("/metrics", () => Results.Ok(new { latency_ms = 42 }));

@@ -1,4 +1,5 @@
 import sys
+from urllib import response
 import keyboard
 import io
 import base64
@@ -147,9 +148,10 @@ class ChatWindow(QMainWindow):
         chat_container.setContentsMargins(10, 10, 10, 10) 
         chat_container.setSpacing(5)
 
-        lat_val = "100ms"
+        lat_val = "0ms"
         try:
-            lat_val = requests.get(f"{BACKEND_URL}/latency", timeout=1).json()
+            response = requests.get(f"{BACKEND_URL}/latency", timeout=1)
+            lat_val = response.json().get("formatted", "0ms")
         except: pass
 
         self.latency_label = QLabel(f"Latency: {lat_val}")
@@ -213,7 +215,8 @@ class ChatWindow(QMainWindow):
         
         self.screenshot_check = QCheckBox("Screenshots")
         self.screenshot_check.stateChanged.connect(self._update_screenshot_status)
-        self.smart_mode_check = QCheckBox("Smart Mode")        
+        self.smart_mode_check = QCheckBox("Smart Mode")
+        self.smart_mode_check.stateChanged.connect(self._update_smart_mode_status)  
 
         sidebar_layout.addWidget(side_title)
         sidebar_layout.addWidget(self.screenshot_check)
@@ -327,6 +330,17 @@ class ChatWindow(QMainWindow):
         self.update_ui_state(True)
         self.timer.start(1000)
         self.timer_label.setVisible(True)
+
+        if self.smart_mode_check.isChecked():
+            self._update_smart_mode_status()
+    
+    def _update_smart_mode_status(self):
+        if not self.started or not self.signalr_worker:
+            return
+        if self.smart_mode_check.isChecked():
+            model = self.model_dropdown.currentText()
+            self.add_message("System: Smart Mode Activated", False)
+            self.signalr_worker.invoke_stream("StreamSmartMode", [model])
     
     def resizeEvent(self, event):
         super().resizeEvent(event)
