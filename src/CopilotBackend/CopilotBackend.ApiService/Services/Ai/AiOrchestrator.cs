@@ -71,7 +71,7 @@ public class AiOrchestrator
     {
         if (!_audioService.IsRunning)
         {
-            yield return "Audio capture is not running.";
+            yield return "System: Audio capture is not running.";
             yield break;
         }
 
@@ -81,19 +81,103 @@ public class AiOrchestrator
         var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
         if (provider == null)
         {
-            yield return $"Error: LLM Provider '{modelName}' not found.";
+            yield return $"System: LLM Provider '{modelName}' not found.";
             yield break;
         }
 
-        var systemPrompt = await _promptManager.GetSystemPrompt();
+        IAsyncEnumerable<string>? stream = null;
+        string? errorMessage = null;
 
-        var messages = new List<ChatMessage>
+        try
         {
-            new(ChatRole.System, systemPrompt),
-            new(ChatRole.User, prompt)
-        };
+            var systemPrompt = await _promptManager.GetSystemPrompt();
+            var messages = new List<ChatMessage>
+            {
+                new(ChatRole.System, systemPrompt),
+                new(ChatRole.User, prompt)
+            };
+            stream = provider.StreamResponseAsync(messages, version);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"System: Failed to initialize stream. {ex.Message}";
+        }
 
-        await foreach (var chunk in provider.StreamResponseAsync(messages, version))
+        if (errorMessage != null)
+        {
+            yield return errorMessage;
+            yield break;
+        }
+
+        await foreach (var chunk in stream!)
+        {
+            yield return chunk;
+        }
+    }
+
+    private async IAsyncEnumerable<string> StreamResponseWithVisionAsync(string modelName, string prompt, string? base64Image)
+    {
+        var name = modelName.Split(' ')[0];
+        var version = modelName.Split(' ')[1];
+        var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
+
+        if (provider == null)
+        {
+            yield return $"System: Provider '{name}' not found.";
+            yield break;
+        }
+
+        IAsyncEnumerable<string>? stream = null;
+        string? errorMessage = null;
+
+        try
+        {
+            var systemPrompt = await _promptManager.GetSystemPrompt();
+            var messages = new List<ChatMessage>
+            {
+                new(ChatRole.System, systemPrompt),
+                new(ChatRole.User, prompt)
+            };
+            stream = provider.StreamResponseAsync(messages, version, base64Image);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"System: Error starting vision stream. {ex.Message}";
+        }
+
+        if (errorMessage != null)
+        {
+            yield return errorMessage;
+            yield break;
+        }
+
+        await foreach (var chunk in stream!)
+        {
+            yield return chunk;
+        }
+    }
+
+    private async IAsyncEnumerable<string> StreamActionWithPrompt(string modelName, string? base64Image, Task<string> promptTask)
+    {
+        string? prompt = null;
+        string? errorMessage = null;
+
+        try
+        {
+            prompt = await promptTask;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"System: Failed to load prompt. {ex.Message}";
+        }
+
+        if (errorMessage != null)
+        {
+            yield return errorMessage;
+            yield break;
+        }
+
+        await foreach (var chunk in StreamResponseWithVisionAsync(modelName, prompt!, base64Image))
         {
             yield return chunk;
         }
@@ -156,37 +240,6 @@ public class AiOrchestrator
             AiActionType.Followup => StreamActionWithPrompt(modelName, base64Image, _promptManager.GetFollowupPromt()),
             _ => StreamResponseWithVisionAsync(modelName, userText ?? "", base64Image)
         };
-    }
-
-    private async IAsyncEnumerable<string> StreamActionWithPrompt(string modelName, string? base64Image, Task<string> promptTask)
-    {
-        var prompt = await promptTask;
-        await foreach (var chunk in StreamResponseWithVisionAsync(modelName, prompt, base64Image))
-        {
-            yield return chunk;
-        }
-    }
-
-    private async IAsyncEnumerable<string> StreamResponseWithVisionAsync(string modelName, string prompt, string? base64Image)
-    {
-        var name = modelName.Split(' ')[0];
-        var version = modelName.Split(' ')[1];
-        var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
-        if (provider == null) yield break;
-
-
-        var systemPrompt = await _promptManager.GetSystemPrompt();
-
-        var messages = new List<ChatMessage>
-        {
-            new(ChatRole.System, systemPrompt),
-            new(ChatRole.User, prompt)
-        };
-
-        await foreach (var chunk in provider.StreamResponseAsync(messages, version, base64Image))
-        {
-            yield return chunk;
-        }
     }
 
     public enum AiActionType

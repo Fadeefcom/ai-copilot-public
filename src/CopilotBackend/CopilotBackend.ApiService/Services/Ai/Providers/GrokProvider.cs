@@ -64,6 +64,7 @@ public class GrokProvider : ILlmProvider
         var request = CreateRequest(context, modelToUse, true, base64Image);
 
         HttpResponseMessage? responseMessage = null;
+        string? errorMessage = null;
 
         try
         {
@@ -73,7 +74,13 @@ public class GrokProvider : ILlmProvider
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to initiate stream with Grok model: {Model}", modelToUse);
-            throw;
+            errorMessage = $"System: Grok Error - {responseMessage?.StatusCode.ToString()}";
+        }
+
+        if (!string.IsNullOrEmpty(errorMessage))
+        {
+            yield return errorMessage;
+            yield break;
         }
 
         using var stream = await responseMessage.Content.ReadAsStreamAsync(ct);

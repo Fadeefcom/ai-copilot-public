@@ -6,26 +6,14 @@ from PIL import ImageGrab
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QPushButton, QComboBox, QCheckBox, QListWidget, 
                              QListWidgetItem, QAbstractItemView, QLabel, QApplication,
-                             QFrame, QScrollArea, QGraphicsDropShadowEffect)
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QTime, QSize
+                             QFrame, QSizePolicy)
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QTime
 from PyQt6.QtGui import QFont, QColor
 
 from constants import UI_TEXTS, MODELS, SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE
 from widgets import ChatMessage, ChatInput
 from threads import SignalRWorker, AudioCaptureThread, TypingIndicator
-
-COLORS = {
-    "bg": "#09090b",
-    "card": "#101014",
-    "primary": "#00e5ff",  # Cyan
-    "secondary": "#27272a",
-    "accent": "#a855f7",   # Purple
-    "success": "#22c55e",
-    "destructive": "#ef4444",
-    "warning": "#f59e0b",
-    "border": "#27272a",
-    "text_muted": "#71717a"
-}
+from constants import COLORS
 
 class ChatWindow(QMainWindow):
     toggle_signal = pyqtSignal()
@@ -43,23 +31,37 @@ class ChatWindow(QMainWindow):
         self.current_stream_text = ""
 
         self.setWindowTitle(self.texts['title'])
-        self.resize(900, 750)
+        self.resize(1000, 750)
         
+        self.setWindowOpacity(0.8)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        
+        self.setWindowFlags(
+            Qt.WindowType.Window | 
+            Qt.WindowType.WindowStaysOnTopHint | 
+            Qt.WindowType.Tool |
+            Qt.WindowType.CustomizeWindowHint |
+            Qt.WindowType.WindowCloseButtonHint
+        )
+
         self.setStyleSheet(f"""
             QMainWindow {{ background-color: {COLORS['bg']}; }}
-            QWidget {{ color: white; font-family: 'Inter', 'Segoe UI'; }}
+            QWidget {{ color: white; font-family: 'Segoe UI', 'Arial'; }}
+            QFrame#Header {{ 
+                background-color: {COLORS['card']}; 
+                border-bottom: 1px solid {COLORS['border']}; 
+            }}
+            QFrame#Sidebar {{ 
+                background-color: {COLORS['card']}; 
+                border-left: 1px solid {COLORS['border']}; 
+            }}
             QComboBox {{ 
                 background-color: {COLORS['secondary']}; 
                 border: 1px solid {COLORS['border']}; 
                 border-radius: 4px; padding: 2px 10px; 
             }}
-            QPushButton {{ 
-                background-color: {COLORS['secondary']}; 
-                border-radius: 6px; font-weight: bold; 
-            }}
+            QCheckBox {{ color: {COLORS['text_muted']}; }}
         """)
-
-        self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
 
         self._set_window_affinity()
         self._init_ui()
@@ -70,184 +72,227 @@ class ChatWindow(QMainWindow):
         keyboard.add_hotkey('ctrl+/', lambda: self.toggle_signal.emit())
         keyboard.add_hotkey('f1', lambda: self.action_signal.emit('say'))
         keyboard.add_hotkey('f2', lambda: self.action_signal.emit('followup'))
-    
+
     def _init_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         self.main_layout = QVBoxLayout(central_widget)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(0)
-        self.lang_dropdown.currentTextChanged.connect(self._change_language)
 
-        # 1. HEADER
         self.header = QFrame()
-        self.header.setFixedHeight(60)
-        self.header.setStyleSheet(f"background-color: {COLORS['card']}; border-bottom: 1px solid {COLORS['border']};")
+        self.header.setObjectName("Header")
+        self.header.setFixedHeight(56)
         header_layout = QHBoxLayout(self.header)
-        
-        self.logo = QLabel("AI COPILOT")
-        self.logo.setStyleSheet(f"color: {COLORS['primary']}; font-weight: bold; font-size: 18px;")
+        header_layout.setContentsMargins(15, 0, 15, 0)
         
         self.start_button = QPushButton(self.texts['start'])
-        self.start_button.setFixedSize(80, 32)
+        self.start_button.setFixedSize(80, 30)
         self.start_button.clicked.connect(self.on_start)
-        self.update_button_style(self.start_button, COLORS['primary'])
+        self.update_btn_style(self.start_button, COLORS['primary'], is_glow=True)
 
         self.stop_button = QPushButton(self.texts['stop'])
-        self.stop_button.setFixedSize(80, 32)
+        self.stop_button.setFixedSize(80, 30)
         self.stop_button.clicked.connect(self.on_stop)
         self.stop_button.setVisible(False)
-        self.update_button_style(self.stop_button, COLORS['destructive'])
+        self.update_btn_style(self.stop_button, COLORS['destructive'])
 
-        self.status_badge = QLabel("STOPPED")
-        self.status_badge.setStyleSheet(f"background-color: {COLORS['secondary']}; color: {COLORS['text_muted']}; padding: 4px 12px; border-radius: 12px; font-size: 11px;")
-
-        header_layout.addWidget(self.logo)
-        header_layout.addSpacing(20)
         header_layout.addWidget(self.start_button)
         header_layout.addWidget(self.stop_button)
-        header_layout.addWidget(self.status_badge)
         header_layout.addStretch()
 
         self.timer_label = QLabel("00:00:00")
-        self.timer_label.setStyleSheet(f"font-family: 'JetBrains Mono'; color: {COLORS['primary']}; font-size: 16px;")
+        self.timer_label.setStyleSheet(f"font-family: 'JetBrains Mono'; color: {COLORS['primary']}; font-size: 14px;")
+        self.timer_label.setVisible(False)
         
         self.model_dropdown = QComboBox()
         self.model_dropdown.addItems(MODELS)
-        self.model_dropdown.setFixedWidth(150)
+        self.model_dropdown.setFixedWidth(120)
+
+        self.lang_dropdown = QComboBox()
+        self.lang_dropdown.addItems(['ru','en'])
+        self.lang_dropdown.setFixedWidth(70)
+        self.lang_dropdown.setCurrentText(self.current_lang)
+        self.lang_dropdown.currentTextChanged.connect(self._change_language)
+
+        self.sidebar_toggle = QPushButton("✕")
+        self.sidebar_toggle.setFixedSize(30, 30)
+        self.sidebar_toggle.setCheckable(True)
+        self.sidebar_toggle.setChecked(True)
+        self.sidebar_toggle.setStyleSheet(f"color: {COLORS['primary']}; background: transparent; font-size: 18px; border: none;")
+        self.sidebar_toggle.clicked.connect(self.toggle_sidebar)
 
         header_layout.addWidget(self.timer_label)
         header_layout.addWidget(self.model_dropdown)
+        header_layout.addWidget(self.lang_dropdown)
+        header_layout.addWidget(self.sidebar_toggle)
+
         self.main_layout.addWidget(self.header)
 
-        # 2. CONTENT AREA (Chat + Sidebar)
-        content_container = QWidget()
-        content_layout = QHBoxLayout(content_container)
-        content_layout.setContentsMargins(8, 8, 8, 8)
-        content_layout.setSpacing(8)
+        content_area = QHBoxLayout()
+        content_area.setSpacing(0)
 
-        # Chat Hub
-        self.chat_hub = QFrame()
-        self.chat_hub.setStyleSheet(f"background-color: {COLORS['card']}; border-radius: 8px; border: 1px solid {COLORS['border']};")
-        chat_v_layout = QVBoxLayout(self.chat_hub)
+        chat_container = QVBoxLayout()
+        chat_container.setContentsMargins(10, 10, 10, 10) 
+        chat_container.setSpacing(5) 
+
+        self.latency_label = QLabel("Latency: ~42ms")
+        self.latency_label.setStyleSheet(f"color: {COLORS['primary']}; font-size: 10px; margin-left: 5px;")
+        chat_container.addWidget(self.latency_label)
 
         self.chat_list = QListWidget()
-        self.chat_list.setStyleSheet("background: transparent; border: none;")
+        self.chat_list.setStyleSheet("""
+            QListWidget {
+                background: transparent;
+                border: none;
+                outline: none;
+            }
+        """)
         self.chat_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.chat_list.setSpacing(8)
         
-        # Action Toolbar
-        toolbar = QHBoxLayout()
-        self.say_button = self.create_action_btn(self.texts['say_btn'], COLORS['primary'], "F1")
-        self.say_button.clicked.connect(lambda: self.send_button_prompt('say'))
+        self.action_toolbar = QHBoxLayout()
+        self.action_toolbar.setSpacing(10)
+        self.action_toolbar.setContentsMargins(0, 5, 0, 5) 
         
-        self.followup_button = self.create_action_btn(self.texts['followup_btn'], COLORS['accent'], "F2")
-        self.followup_button.clicked.connect(lambda: self.send_button_prompt('followup'))
+        self.say_button = self.create_action_btn('say', COLORS['primary'], "F1")
+        self.followup_button = self.create_action_btn('followup', COLORS['accent'], "F2")
+        self.assist_button = self.create_action_btn('assist', COLORS['warning'], "")
 
-        self.assist_button = self.create_action_btn(self.texts['assist_btn'], COLORS['warning'], "")
-        self.assist_button.clicked.connect(lambda: self.send_button_prompt('assist'))
-
-        toolbar.addWidget(self.say_button)
-        toolbar.addWidget(self.followup_button)
-        toolbar.addWidget(self.assist_button)
+        self.action_toolbar.addWidget(self.say_button)
+        self.action_toolbar.addWidget(self.followup_button)
+        self.action_toolbar.addWidget(self.assist_button)
+        self.action_toolbar.addStretch()
 
         self.input_box = ChatInput()
-        self.input_box.setFixedHeight(80)
-        self.input_box.setStyleSheet(f"background-color: {COLORS['bg']}; border: 1px solid {COLORS['border']}; border-radius: 6px; padding: 8px;")
+        self.input_box.setFixedHeight(80) 
+        self.input_box.setStyleSheet(f"""
+            ChatInput {{
+                background-color: {COLORS['secondary']};
+                color: #e2e8f0;
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 13px;
+            }}
+            ChatInput:focus {{
+                border: 1px solid {COLORS['primary']};
+            }}
+        """)
         self.input_box.send_signal.connect(self.send_message)
+        self.input_box.setEnabled(False)
 
-        chat_v_layout.addWidget(self.chat_list)
-        chat_v_layout.addLayout(toolbar)
-        chat_v_layout.addWidget(self.input_box)
+        chat_container.addWidget(self.chat_list, 1)
+        chat_container.addLayout(self.action_toolbar)
+        chat_container.addWidget(self.input_box)
 
-        # 3. SIDEBAR
         self.sidebar = QFrame()
-        self.sidebar.setFixedWidth(240)
-        self.sidebar.setStyleSheet(f"background-color: {COLORS['card']}; border-radius: 8px; border: 1px solid {COLORS['border']};")
+        self.sidebar.setObjectName("Sidebar")
+        self.sidebar.setFixedWidth(256)
         sidebar_layout = QVBoxLayout(self.sidebar)
+        sidebar_layout.setContentsMargins(15, 20, 15, 15)
 
-        sidebar_layout.addWidget(QLabel("CONTEXT SETTINGS"))
+        side_title = QLabel("CONTEXT SETTINGS")
+        side_title.setStyleSheet(f"color: {COLORS['primary']}; font-weight: bold; font-size: 12px; margin-bottom: 10px;")
         
         self.screenshot_check = QCheckBox("Screenshots")
         self.screenshot_check.stateChanged.connect(self._update_screenshot_status)
-        
-        self.smart_button = QCheckBox("Smart Mode")
-        
-        sidebar_layout.addWidget(self.screenshot_check)
-        sidebar_layout.addWidget(self.smart_button)
-        sidebar_layout.addStretch()
-        
-        # System Stats
-        self.stats_panel = QFrame()
-        self.stats_panel.setStyleSheet(f"background-color: rgba(0,0,0,0.2); border-radius: 4px; padding: 8px;")
-        stats_layout = QVBoxLayout(self.stats_panel)
-        self.latency_label = QLabel("Latency: ~42ms")
-        self.latency_label.setStyleSheet(f"color: {COLORS['primary']}; font-size: 10px;")
-        stats_layout.addWidget(self.latency_label)
-        sidebar_layout.addWidget(self.stats_panel)
+        self.smart_mode_check = QCheckBox("Smart Mode")        
 
-        content_layout.addWidget(self.chat_hub)
-        content_layout.addWidget(self.sidebar)
-        self.main_layout.addWidget(content_container)
+        sidebar_layout.addWidget(side_title)
+        sidebar_layout.addWidget(self.screenshot_check)
+        sidebar_layout.addWidget(self.smart_mode_check)
+        sidebar_layout.addStretch()
+
+        content_area.addLayout(chat_container, 1)
+        content_area.addWidget(self.sidebar)
+        
+        self.main_layout.addLayout(content_area)
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_timer)
         self.elapsed = QTime(0, 0, 0)
-
-    def create_action_btn(self, text, color, shortcut):
-        btn = QPushButton(f"{text}  {shortcut}")
-        btn.setFixedHeight(36)
+        
+    def create_action_btn(self, p_type, color_hex, badge):
+        text = self.texts[f'{p_type}_btn']
+        if badge:
+            text = f"{text}  {badge}"
+            
+        btn = QPushButton(text)
+        btn.setFixedHeight(40)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setEnabled(False)
+        
+        # Конвертируем HEX в RGBA (15% прозрачности) для ховера
+        c = QColor(color_hex)
+        rgba_hover = f"rgba({c.red()}, {c.green()}, {c.blue()}, 40)"
+        
         btn.setStyleSheet(f"""
-            QPushButton {{ 
-                background-color: {COLORS['secondary']}; 
-                color: white; 
+            QPushButton {{
+                background-color: {COLORS['secondary']};
+                color: #e2e8f0;
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+                padding: 0 16px;
+                font-size: 13px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                border: 1px solid {color_hex};
+                background-color: {rgba_hover};
+                color: white;
+            }}
+            QPushButton:pressed {{
+                background-color: {color_hex};
+                color: black;
+            }}
+            QPushButton:disabled {{
+                background-color: transparent;
+                color: {COLORS['text_muted']};
                 border: 1px solid {COLORS['border']};
             }}
-            QPushButton:hover {{ 
-                border: 1px solid {color}; 
-                background-color: {color}22; 
-            }}
         """)
+        btn.clicked.connect(lambda: self.send_button_prompt(p_type))
         return btn
-    
-    def update_button_style(self, btn, color):
+
+    def update_btn_style(self, btn, color_hex, is_glow=False):
+        # В Qt QSS обводка задается через border
+        border_val = f"1px solid {color_hex}" if is_glow else f"1px solid {COLORS['border']}"
+        
         btn.setStyleSheet(f"""
-            QPushButton {{ 
-                background-color: {color}; 
-                color: {COLORS['bg']}; 
-                border-radius: 6px; 
-                font-weight: bold; 
+            QPushButton {{
+                background-color: {COLORS['bg']};
+                color: {color_hex};
+                border: {border_val};
+                border-radius: 6px;
+                font-weight: 800;
+                font-size: 11px;
             }}
-            QPushButton:hover {{ background-color: white; }}
+            QPushButton:hover {{
+                background-color: {color_hex};
+                color: black;
+            }}
         """)
+    
+    def toggle_sidebar(self):
+        is_visible = self.sidebar.isVisible()
+        self.sidebar.setVisible(not is_visible)
+        self.sidebar_toggle.setText("⚙" if is_visible else "✕")
 
     def _change_language(self):
         self.current_lang = self.lang_dropdown.currentText()
         self.texts = UI_TEXTS[self.current_lang]
-        
         self.setWindowTitle(self.texts['title'])
-        
-        self.lang_label.setText(self.texts['lang_label'])
-        
-        if not self.started:
-            self.start_button.setText(self.texts['start'])
-        else:
-            self.stop_button.setText(self.texts['stop'])
-        
-        self.say_button.setText(f"{self.texts['say_btn']}  F1")
-        self.followup_button.setText(f"{self.texts['followup_btn']}  F2")
+        self.start_button.setText(self.texts['start'])
+        self.stop_button.setText(self.texts['stop'])
+        self.say_button.setText(f"{self.texts['say_btn']} F1")
+        self.followup_button.setText(f"{self.texts['followup_btn']} F2")
         self.assist_button.setText(self.texts['assist_btn'])
-        self.smart_button.setText(self.texts['smart_btn'])
-    
-    def closeEvent(self, event):
-        self.on_stop()
-        QApplication.quit()
-        event.accept()
 
     def on_start(self):
         if self.started: return
         self.start_button.setEnabled(False)
         self.lang_dropdown.setEnabled(False)
-        self.start_button.setText("...")
         
         self.signalr_worker = SignalRWorker(self.model_dropdown.currentText())
         self.signalr_worker.chunk_received.connect(self.on_llm_chunk)
@@ -262,14 +307,24 @@ class ChatWindow(QMainWindow):
         
         self.mic_thread = AudioCaptureThread(self.signalr_worker, role="me")
         self.mic_thread.start()
-
         QTimer.singleShot(500, self._start_speaker_thread)
         
         self.started = True
-        self.start_button.setText(self.texts['start'])
         self.update_ui_state(True)
         self.timer.start(1000)
         self.timer_label.setVisible(True)
+    
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if not hasattr(self, 'chat_list'): return
+        
+        new_width = self.chat_list.viewport().width()
+        for i in range(self.chat_list.count()):
+            item = self.chat_list.item(i)
+            widget = self.chat_list.itemWidget(item)
+            if isinstance(widget, ChatMessage):
+                widget.update_width(new_width)
+                item.setSizeHint(widget.sizeHint())
 
     def _start_speaker_thread(self):
         if self.started:
@@ -278,35 +333,58 @@ class ChatWindow(QMainWindow):
 
     def on_stop(self):
         self.stop_typing()
-        
         if hasattr(self, 'mic_thread') and self.mic_thread:
-            self.mic_thread.stop()
-            self.mic_thread.wait(500)
+            self.mic_thread.stop(); self.mic_thread.wait(500)
             self.mic_thread = None
-
         if hasattr(self, 'speaker_thread') and self.speaker_thread:
-            self.speaker_thread.stop()
-            self.speaker_thread.wait(500)
+            self.speaker_thread.stop(); self.speaker_thread.wait(500)
             self.speaker_thread = None
-
         if self.signalr_worker:
-            self.signalr_worker.stop()
-            self.signalr_worker.wait(1000)
+            self.signalr_worker.stop(); self.signalr_worker.wait(1000)
             self.signalr_worker = None
 
         self.started = False
         self.update_ui_state(False)
         self.lang_dropdown.setEnabled(True)
         self.timer.stop()
-        self.elapsed = QTime(0, 0, 0) # Сброс таймера
+        self.elapsed = QTime(0, 0, 0)
         self.timer_label.setText('00:00:00')
         self.timer_label.setVisible(False)
+
+    def update_ui_state(self, is_started):
+        self.start_button.setVisible(not is_started)
+        self.start_button.setEnabled(True)
+        self.stop_button.setVisible(is_started)
+        self.input_box.setEnabled(is_started)
+        self.say_button.setEnabled(is_started)
+        self.followup_button.setEnabled(is_started)
+        self.assist_button.setEnabled(is_started)
+
+    def add_message(self, text, is_user=False):
+        current_width = self.chat_list.viewport().width()
+        # Создаем виджет
+        widget = ChatMessage(text, is_user, max_width=current_width)
+        
+        item = QListWidgetItem()
+        # Убираем выделение элемента списка, чтобы была видна только наша стилизация
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+        
+        self.chat_list.addItem(item)
+        self.chat_list.setItemWidget(item, widget)
+        
+        # Заставляем ListWidget пересчитать размер
+        item.setSizeHint(widget.sizeHint())
+        self.chat_list.scrollToBottom()
+        return widget
+
+    def update_timer(self):
+        self.elapsed = self.elapsed.addSecs(1)
+        self.timer_label.setText(self.elapsed.toString('hh:mm:ss'))
 
     def send_message(self):
         if not self.started: return
         text = self.input_box.toPlainText().strip()
         if not text: return
-        
         self.add_message(text, is_user=True)
         img = self._capture_screenshot()
         self.start_typing()
@@ -319,7 +397,6 @@ class ChatWindow(QMainWindow):
         self.signalr_worker.send_screenshot(img)
         self.add_message(self.texts[f'{p_type}_btn'], is_user=True)
         self.start_typing()
-        
         method = {"say": "SendAssistRequest", "followup": "SendFollowupRequest", "assist": "SendMessage"}[p_type]
         args = [self.model_dropdown.currentText(), img]
         if p_type == "assist": args.insert(0, self.texts['assist_btn'])
@@ -327,14 +404,27 @@ class ChatWindow(QMainWindow):
 
     def on_llm_chunk(self, chunk):
         self.stop_typing()
+        
+        if chunk.startswith("System:"):
+            self.current_stream_msg_widget = None
+            self.add_message(chunk, False)
+            return
+        
         if chunk == "[DONE]":
             self.current_stream_msg_widget = None
             return
+            
         if not self.current_stream_msg_widget:
             self.current_stream_msg_widget = self.add_message("", False)
             self.current_stream_text = ""
+            
         self.current_stream_text += chunk
         self.current_stream_msg_widget.set_markdown(self.current_stream_text)
+        
+        item = self.chat_list.item(self.chat_list.count() - 1)
+        if item:
+            item.setSizeHint(self.current_stream_msg_widget.sizeHint())
+            
         self.chat_list.scrollToBottom()
 
     def start_typing(self):
@@ -344,7 +434,6 @@ class ChatWindow(QMainWindow):
         self.typing_item.setSizeHint(label.sizeHint())
         self.chat_list.addItem(self.typing_item)
         self.chat_list.setItemWidget(self.typing_item, label)
-        
         self.typing_thread = TypingIndicator()
         self.typing_thread.update_signal.connect(lambda d: label.set_markdown(d))
         self.typing_thread.start()
@@ -353,123 +442,10 @@ class ChatWindow(QMainWindow):
     def stop_typing(self):
         if hasattr(self, 'typing_item') and self.typing_item:
             if hasattr(self, 'typing_thread'):
-                self.typing_thread.stop()
-                self.typing_thread.wait()
+                self.typing_thread.stop(); self.typing_thread.wait()
             row = self.chat_list.row(self.typing_item)
-            if row >= 0:
-                self.chat_list.takeItem(row)
+            if row >= 0: self.chat_list.takeItem(row)
             self.typing_item = None
-
-    def add_message(self, text, is_user=False):
-        widget = ChatMessage(text, is_user)
-        if text.startswith("System:"):
-            if "Lost" in text or "Error" in text:
-                widget.label.setStyleSheet("color: #FF5555; background-color: rgba(40,20,20,0.6); padding:4px; border-radius:4px;")
-            elif "Connected" in text:
-                widget.label.setStyleSheet("color: #55FF55; background-color: rgba(20,40,20,0.6); padding:4px; border-radius:4px;")
-            else:
-                widget.label.setStyleSheet("color: #AAAAAA; background-color: rgba(40,40,40,0.6); padding:4px; border-radius:4px;")
-        item = QListWidgetItem()
-        item.setSizeHint(widget.sizeHint())
-        self.chat_list.addItem(item)
-        self.chat_list.setItemWidget(item, widget)
-        self.chat_list.scrollToBottom()
-        return widget
-
-    def update_ui_state(self, is_started):
-        self.start_button.setVisible(not is_started)
-        self.start_button.setEnabled(True)
-        self.stop_button.setVisible(is_started)
-        self.input_box.setEnabled(is_started)
-        self.say_button.setEnabled(is_started)
-        self.followup_button.setEnabled(is_started)
-        self.assist_button.setEnabled(is_started)
-        self.smart_button.setEnabled(is_started)
-    
-    def _update_screenshot_status(self):
-        if self.signalr_worker:
-            self.signalr_worker.screenshots_enabled = self.screenshot_check.isChecked()
-
-    def _init_ui(self):
-        central_widget = QWidget()
-        central_widget.setStyleSheet("background: rgba(20,20,20,0.99);")
-        self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(5,5,5,5)
-
-        top_layout = QHBoxLayout()
-        self.lang_label = QLabel(self.texts['lang_label'])
-        self.lang_dropdown = QComboBox()
-        self.lang_dropdown.addItems(['ru','en'])
-        self.lang_dropdown.setCurrentText(self.current_lang)
-        top_layout.addWidget(self.lang_label)
-        top_layout.addWidget(self.lang_dropdown)
-
-        center_box = QHBoxLayout()
-        center_box.addStretch()
-        self.start_button = QPushButton(self.texts['start'])
-        self.start_button.clicked.connect(self.on_start)
-        self.start_button.setFixedSize(60, 24)
-        self.start_button.setStyleSheet("QPushButton{background-color: rgba(50,150,50,0.99); color:#FFFFFF; border-radius:6px;} QPushButton:hover{background-color: rgba(70,180,70,1);}")
-        
-        self.stop_button = QPushButton(self.texts['stop'])
-        self.stop_button.clicked.connect(self.on_stop)
-        self.stop_button.setFixedSize(60, 24)
-        self.stop_button.setStyleSheet("QPushButton{background-color: rgba(200,0,0,0.99); color:#FFFFFF; border-radius:6px;} QPushButton:hover{background-color: rgba(230,30,30,1);}")
-        self.stop_button.setVisible(False)
-        center_box.addWidget(self.start_button)
-        center_box.addWidget(self.stop_button)
-        center_box.addStretch()
-        top_layout.addLayout(center_box)
-
-        self.screenshot_check = QCheckBox("Screenshots")
-        self.screenshot_check.stateChanged.connect(self._update_screenshot_status)
-        self.screenshot_check.setStyleSheet("color: #AAAAAA; margin-right: 10px;")
-        top_layout.addWidget(self.screenshot_check)
-        
-        self.smart_button = QPushButton(self.texts['smart_btn'])
-        self.smart_button.setCheckable(True)
-        self.smart_button.setStyleSheet("QPushButton{background-color: rgba(80,80,80,0.5); color:#AAAAAA; border-radius:4px; padding:2px 8px;} QPushButton:checked{background-color: rgba(100,200,100,0.8); color: white;}")
-        top_layout.addWidget(self.smart_button)
-        
-        self.timer_label = QLabel('00:00:00')
-        self.timer_label.setStyleSheet("color: white;")
-        self.timer_label.setVisible(False)
-        top_layout.addWidget(self.timer_label)
-        main_layout.addLayout(top_layout)
-
-        self.chat_list = QListWidget()
-        self.chat_list.setStyleSheet("background: transparent; border: none;")
-        self.chat_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        self.chat_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
-        self.chat_list.setSpacing(5)
-        main_layout.addWidget(self.chat_list)
-
-        self.input_box = ChatInput()
-        self.input_box.setFixedHeight(50)
-        self.input_box.setFont(QFont("Segoe UI", 10))
-        self.input_box.setStyleSheet("background-color: rgba(30,30,30,0.6); color:#E0E0E0; border-radius:4px;")
-        self.input_box.send_signal.connect(self.send_message)
-        self.input_box.setEnabled(False)
-        main_layout.addWidget(self.input_box)
-
-        button_layout = QHBoxLayout()
-        style_btn = "QPushButton{background-color: rgba(50,50,50,0.6); color:#E0E0E0; border-radius:4px; padding:6px;} QPushButton:hover{background-color: rgba(90,90,90,0.9);}" 
-        self.say_button = QPushButton(self.texts['say_btn']); self.say_button.setStyleSheet(style_btn); self.say_button.setEnabled(False)
-        self.say_button.clicked.connect(lambda: self.send_button_prompt('say'))
-        self.followup_button = QPushButton(self.texts['followup_btn']); self.followup_button.setStyleSheet(style_btn); self.followup_button.setEnabled(False)
-        self.followup_button.clicked.connect(lambda: self.send_button_prompt('followup'))
-        self.assist_button = QPushButton(self.texts['assist_btn']); self.assist_button.setStyleSheet(style_btn); self.assist_button.setEnabled(False)
-        self.assist_button.clicked.connect(lambda: self.send_button_prompt('assist'))
-        button_layout.addWidget(self.say_button); button_layout.addWidget(self.followup_button); button_layout.addWidget(self.assist_button)
-        main_layout.addLayout(button_layout)
-
-        self.model_dropdown = QComboBox()
-        self.model_dropdown.addItems(MODELS)
-        main_layout.addWidget(self.model_dropdown)
-        
-        self.timer = QTimer(); self.timer.timeout.connect(self.update_timer)
-        self.elapsed = QTime(0,0,0)
 
     def _capture_screenshot(self):
         if self.screenshot_check.isChecked():
@@ -482,6 +458,10 @@ class ChatWindow(QMainWindow):
             except: pass
         return None
 
+    def _update_screenshot_status(self):
+        if self.signalr_worker:
+            self.signalr_worker.screenshots_enabled = self.screenshot_check.isChecked()
+
     def _set_window_affinity(self):
         if sys.platform == "win32" and SetWindowDisplayAffinity:
             SetWindowDisplayAffinity(self.winId().__int__(), WDA_EXCLUDEFROMCAPTURE)
@@ -490,9 +470,10 @@ class ChatWindow(QMainWindow):
         if self.isVisible(): self.hide()
         else: self.show(); self.raise_()
 
-    def update_timer(self):
-        self.elapsed = self.elapsed.addSecs(1)
-        self.timer_label.setText(self.elapsed.toString('hh:mm:ss'))
+    def closeEvent(self, event):
+        self.on_stop()
+        QApplication.quit()
+        event.accept()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

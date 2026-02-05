@@ -1,51 +1,96 @@
 import re
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, 
                              QLabel, QFrame, QSizePolicy)
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QKeyEvent
+from constants import COLORS
 
 class ChatMessage(QFrame):
-    def __init__(self, text, is_user=False):
+    def __init__(self, text, is_user=False, max_width=None):
         super().__init__()
         self.setFrameShape(QFrame.Shape.NoFrame)
-        self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(5, 2, 5, 2)
+        self.is_user = is_user
+        self.is_system = text.startswith("System:")
         
+        self._layout = QVBoxLayout(self)
+        self._layout.setSpacing(0)
+        
+        if not self.is_user:
+            self._layout.setContentsMargins(0, 0, 0, 0)
+        else:
+            self._layout.setContentsMargins(10, 5, 10, 5)
+
         h_layout = QHBoxLayout()
+        h_layout.setSpacing(0)
+        h_layout.setContentsMargins(0, 0, 0, 0)
+
         self.label = QLabel()
         self.label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.label.setWordWrap(True)
         self.label.setFont(QFont("Segoe UI", 10))
-        self.label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self.set_markdown(text)
+        self.label.setTextFormat(Qt.TextFormat.RichText)
         
-        if is_user:
+        if self.is_system:
+            bg_color = "rgba(39, 39, 42, 40)"
+            style = f"color: {COLORS['text_muted']}; background-color: {bg_color}; border-radius: 0px; padding: 8px 15px; font-size: 12px; font-style: italic;"
+            self.label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            h_layout.addWidget(self.label)
+        elif is_user:
+            bg_color = "rgba(0, 229, 255, 40)" 
+            style = f"color: #FFFFFF; background-color: {bg_color}; border-radius: 12px; border-bottom-right-radius: 2px; padding: 12px;"
             h_layout.addStretch()
             h_layout.addWidget(self.label)
-            self.label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.label.setStyleSheet("color:#E0E0E0; background-color: rgba(100,150,255,0.2); padding:4px; border-radius:4px;")
         else:
+            bg_color = "rgba(168, 85, 247, 40)"
+            style = f"color: #FFFFFF; background-color: {bg_color}; border-radius: 0px; padding: 15px;"
+            self.label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             h_layout.addWidget(self.label)
-            self.label.setStyleSheet("color:#E0E0E0; background-color: rgba(40,40,40,0.6); padding:4px; border-radius:4px;")
-        
+
+        self.label.setStyleSheet(style)
+        self.set_markdown(text)
         self._layout.addLayout(h_layout)
         
+        if max_width:
+            self.update_width(max_width)
+
+        self.anim = QPropertyAnimation(self, b"windowOpacity")
+        self.anim.setDuration(300)
+        self.anim.setStartValue(0.0)
+        self.anim.setEndValue(1.0)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.anim.start()
+
     def set_markdown(self, text: str):
+        if not text:
+            self.label.setText("")
+            return
         def repl_code(match):
-            code_text = match.group(2)
-            code_text = code_text.replace('<', '&lt;').replace('>', '&gt;')
-            return f'<pre style="background:#2E2E2E; color:#F0F0F0; padding:5px; border-radius:4px;"><code>{code_text}</code></pre>'
-        
+            code_text = match.group(2).replace('<', '&lt;').replace('>', '&gt;')
+            return f'<pre style="background:#1a1a1a; color:#00e5ff; padding:10px; border-radius:6px;"><code>{code_text}</code></pre>'
         md_text = re.sub(r'```(\w*)\n([\s\S]*?)```', repl_code, text)
         md_text = md_text.replace('\n', '<br>')
+        md_text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', md_text)
+        md_text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', md_text)
         self.label.setText(md_text)
 
     def sizeHint(self):
-        return self._layout.sizeHint()
+        self.label.adjustSize()
+        height = self.label.heightForWidth(self.label.width()) + 30
+        return QSize(self.label.width(), height)
+
+    def update_width(self, new_width):
+        if self.is_user:
+            self.label.setMaximumWidth(int(new_width * 0.75))
+        elif self.is_system:
+            self.label.setFixedWidth(new_width - 20)
+        else:
+            self.label.setFixedWidth(new_width)
+        
+        self.label.adjustSize()
+        self.updateGeometry()
 
 class ChatInput(QTextEdit):
     send_signal = pyqtSignal()
-    
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
             self.send_signal.emit()

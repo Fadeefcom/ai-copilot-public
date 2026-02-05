@@ -41,4 +41,17 @@ UI_TEXTS = {
     }
 }
 
+COLORS = {
+    "bg": "#09090b",
+    "card": "#101014",
+    "primary": "#00e5ff",      # Cyan
+    "secondary": "#27272a",    # Dark Gray
+    "accent": "#a855f7",       # Purple
+    "success": "#22c55e",      # Green
+    "destructive": "#ef4444",  # Red
+    "warning": "#f59e0b",      # Orange
+    "border": "#27272a",
+    "text_muted": "#b0b0b6"
+}
+
 MODELS = ["Grok grok-4", "OpenAI gpt-4.1-mini", "OpenAI gpt-5-nano", "OpenAI gpt-5-mini"]

@@ -5,6 +5,7 @@ using CopilotBackend.ApiService.Services;
 using CopilotBackend.ApiService.Services.Ai;
 using CopilotBackend.ApiService.Services.Ai.Providers;
 using CopilotBackend.ApiService.Services.Hubs;
+using Microsoft.AspNetCore.SignalR;
 using Refit;
 using Serilog;
 using Serilog.Events;
@@ -50,7 +51,10 @@ public class Program
         builder.Services.AddSerilog();
         builder.Services.AddOpenApi();
         builder.Services.AddHttpClient();
-        builder.Services.AddSignalR();
+        builder.Services.AddSignalR(options =>
+        {   
+            options.AddFilter<HubErrorFilter>();
+        });
 
         // Domain Services
         builder.Services.AddSingleton<ConversationContextService>();
