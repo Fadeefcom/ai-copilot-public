@@ -29,22 +29,23 @@ class ChatMessage(QFrame):
         self.label.setWordWrap(True)
         self.label.setFont(QFont("Segoe UI", 10))
         self.label.setTextFormat(Qt.TextFormat.RichText)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         
         if self.is_system:
             bg_color = "rgba(39, 39, 42, 40)"
             style = f"color: {COLORS['text_muted']}; background-color: {bg_color}; border-radius: 0px; padding: 8px 15px; font-size: 12px; font-style: italic;"
             self.label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-            h_layout.addWidget(self.label)
+            h_layout.addWidget(self.label, alignment=Qt.AlignmentFlag.AlignLeft)
         elif is_user:
             bg_color = "rgba(0, 229, 255, 40)" 
             style = f"color: #FFFFFF; background-color: {bg_color}; border-radius: 12px; border-bottom-right-radius: 2px; padding: 12px;"
             h_layout.addStretch()
-            h_layout.addWidget(self.label)
+            h_layout.addWidget(self.label, alignment=Qt.AlignmentFlag.AlignRight)
         else:
             bg_color = "rgba(168, 85, 247, 40)"
             style = f"color: #FFFFFF; background-color: {bg_color}; border-radius: 0px; padding: 15px;"
             self.label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-            h_layout.addWidget(self.label)
+            h_layout.addWidget(self.label, alignment=Qt.AlignmentFlag.AlignLeft)
 
         self.label.setStyleSheet(style)
         self.set_markdown(text)
@@ -75,14 +76,17 @@ class ChatMessage(QFrame):
 
     def sizeHint(self):
         self.label.adjustSize()
-        height = self.label.heightForWidth(self.label.width()) + 30
+        height = self.label.heightForWidth(self.label.width()) + 35
         return QSize(self.label.width(), height)
 
     def update_width(self, new_width):
+        self.label.setMinimumWidth(0)
+        self.label.setMaximumWidth(16777215)
+
         if self.is_user:
             self.label.setMaximumWidth(int(new_width * 0.75))
         elif self.is_system:
-            self.label.setFixedWidth(new_width - 20)
+            self.label.setFixedWidth(new_width)
         else:
             self.label.setFixedWidth(new_width)
         
