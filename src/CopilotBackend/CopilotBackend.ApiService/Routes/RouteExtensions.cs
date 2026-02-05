@@ -1,8 +1,10 @@
 ﻿using CopilotBackend.ApiService.Abstractions;
+using CopilotBackend.ApiService.Configuration;
 using CopilotBackend.ApiService.Services;
 using CopilotBackend.ApiService.Services.Ai;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace CopilotBackend.ApiService.Routes;
 
@@ -12,10 +14,38 @@ public static class RouteExtensions
     {
         var api = app.MapGroup("/api");
 
-        api.MapGet("", () =>
+        api.MapGet("/llm/models", (IOptions<AiOptions> options) =>
         {
-            return Results.Ok("healthy");
+            var cfg = options.Value;
+
+            var models = new[]
+            {
+                new
+                {
+                    Id = "fast",
+                    Name = cfg.FastDeployment.Name
+                },
+                new
+                {
+                    Id = "chat",
+                    Name = cfg.ChatDeployment.Name
+                },
+                new
+                {
+                    Id = "thinking",
+                    Name = cfg.ReasoningDeployment.Name
+                }
+            };
+
+            return Results.Ok(models);
+        }).WithName("GetLlmModels");
+
+        api.MapGet("/latency", () =>
+        {
+            return Results.Ok("42ms");
         });
+
+        api.MapGet("/metrics", () => Results.Ok(new { latency_ms = 42 }));
 
         api.MapPost("/message", async ([FromBody] MessageRequest req, [FromServices] AiOrchestrator orchestrator) =>
         {

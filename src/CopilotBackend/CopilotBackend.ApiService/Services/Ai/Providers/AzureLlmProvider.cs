@@ -1,6 +1,7 @@
 ﻿using CopilotBackend.ApiService.Abstractions;
 using CopilotBackend.ApiService.Configuration;
 using Microsoft.Extensions.Options;
+using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -28,7 +29,7 @@ public class AzureLlmProvider : ILlmProvider
 
         if (!string.IsNullOrEmpty(base64Image))
         {
-            var visionResult = await GenerateResponseAsync(currentMessages, "vision", base64Image, ct);
+            var visionResult = await RecognizeTextWithMistralAsync(base64Image, ct);
 
             if (!string.IsNullOrEmpty(visionResult))
             {
@@ -55,7 +56,7 @@ public class AzureLlmProvider : ILlmProvider
 
         if (!string.IsNullOrEmpty(base64Image))
         {
-            var visionResult = await GenerateResponseAsync(currentMessages, "vision", base64Image, ct);
+            var visionResult = await RecognizeTextWithMistralAsync(base64Image, ct);
 
             if (!string.IsNullOrEmpty(visionResult))
             {
@@ -70,7 +71,7 @@ public class AzureLlmProvider : ILlmProvider
 
         var deployment = GetDeploymentName(model);
         var url = deployment.Endpoint;
-        var payload = CreatePayload(currentMessages, deployment.Name, true, null);
+        var payload = CreatePayload(currentMessages, model, true, null);
 
         await foreach (var chunk in ExecuteStreamRequestAsync(url, payload, ct).WithCancellation(ct))
         {
@@ -98,7 +99,11 @@ public class AzureLlmProvider : ILlmProvider
         request.Content = JsonContent.Create(payload);
 
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException($"LLM Error: {response.StatusCode}. Details: {error}");
+        }
 
         using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);
@@ -130,7 +135,7 @@ public class AzureLlmProvider : ILlmProvider
     private JsonObject CreatePayload(IEnumerable<ChatMessage> messages, string deployment, bool stream, string? base64Image)
     {
         var msgArray = new JsonArray();
-        var isReasoningModel = deployment.Contains("o1") || deployment.Contains("grok");
+        var isReasoningModel = !deployment.Equals("gpt-4o-mini", StringComparison.OrdinalIgnoreCase);
         var msgList = messages.ToList();
 
         for (int i = 0; i < msgList.Count; i++)
@@ -160,10 +165,55 @@ public class AzureLlmProvider : ILlmProvider
             }
         }
 
-        var payload = new JsonObject { ["model"] = deployment, ["messages"] = msgArray, ["stream"] = stream };
-        if (!isReasoningModel) payload["temperature"] = 0.3;
+        // max_completion_tokens = budget
+        var payload = new JsonObject {["model"] = deployment,  ["messages"] = msgArray, ["stream"] = stream };
+        if (!isReasoningModel)
+        {
+            payload["temperature"] = 0.3;
+            payload["top_p"] = 0.95;
+        }
 
         return payload;
+    }
+
+    private async Task<string> RecognizeTextWithMistralAsync(string base64Image, CancellationToken ct)
+    {
+        var deployment = _options.VisionDeployment;
+        var url = deployment.Endpoint;
+
+        var payload = new JsonObject
+        {
+            ["model"] = deployment.Name, 
+            ["document"] = new JsonObject
+            {
+                ["type"] = "image_url",
+                ["image_url"] = $"data:image/jpeg;base64,{base64Image}"
+            },
+            ["include_image_base64"] = false
+        };
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, url);
+
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
+        request.Content = JsonContent.Create(payload);
+
+        using var response = await _http.SendAsync(request, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException($"Mistral OCR Error: {response.StatusCode}. Details: {error}");
+        }
+
+        var result = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
+
+        if (result.TryGetProperty("pages", out var pages) && pages.GetArrayLength() > 0)
+        {
+            var markdown = pages[0].GetProperty("markdown").GetString();
+            return markdown ?? string.Empty;
+        }
+
+        return string.Empty;
     }
 
     private DeploymentOptions GetDeploymentName(string model) => model.ToLower() switch

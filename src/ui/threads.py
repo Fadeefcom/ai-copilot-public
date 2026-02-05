@@ -170,7 +170,7 @@ class AudioCaptureThread(QThread):
                 return
 
         try:
-            target_rate = 16000
+            target_rate = 24000
             while self.is_running:
                 try:
                     raw_data = stream.read(self.chunk_size, exception_on_overflow=False)
@@ -178,8 +178,8 @@ class AudioCaptureThread(QThread):
                         continue
                     
                     audio_np = np.frombuffer(raw_data, dtype=np.int16).copy()
-                    if channels > 1:
-                        audio_np = audio_np[::channels]
+                    if channels > 1: 
+                        audio_np = audio_np.reshape(-1, channels).mean(axis=1).astype(np.int16)
                     
                     if np.abs(audio_np).max() == 0:
                         continue

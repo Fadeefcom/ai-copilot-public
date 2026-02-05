@@ -2,6 +2,7 @@ import sys
 import keyboard
 import io
 import base64
+import requests
 from PIL import ImageGrab
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QPushButton, QComboBox, QCheckBox, QListWidget, 
@@ -10,7 +11,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QTime
 from PyQt6.QtGui import QFont, QColor
 
-from constants import UI_TEXTS, MODELS, SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE
+from constants import BACKEND_URL, UI_TEXTS, MODELS, SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE
 from widgets import ChatMessage, ChatInput
 from threads import SignalRWorker, AudioCaptureThread, TypingIndicator
 from constants import COLORS
@@ -106,8 +107,18 @@ class ChatWindow(QMainWindow):
         self.timer_label.setVisible(False)
         
         self.model_dropdown = QComboBox()
-        self.model_dropdown.addItems(MODELS)
-        self.model_dropdown.setFixedWidth(120)
+        self.model_dropdown.setFixedWidth(180)
+
+        try:      
+            response = requests.get(f"{BACKEND_URL}/llm/models", timeout=2)
+            if response.status_code == 200:
+                for m in response.json():
+                    self.model_dropdown.addItem(m['id'])
+            else:
+                self.model_dropdown.addItems(MODELS)
+        except Exception as e:
+            print(f"API Error: {e}")
+            self.model_dropdown.addItems(MODELS)
 
         self.lang_dropdown = QComboBox()
         self.lang_dropdown.addItems(['ru','en'])
@@ -134,9 +145,14 @@ class ChatWindow(QMainWindow):
 
         chat_container = QVBoxLayout()
         chat_container.setContentsMargins(10, 10, 10, 10) 
-        chat_container.setSpacing(5) 
+        chat_container.setSpacing(5)
 
-        self.latency_label = QLabel("Latency: ~42ms")
+        lat_val = "100ms"
+        try:
+            lat_val = requests.get(f"{BACKEND_URL}/latency", timeout=1).json()
+        except: pass
+
+        self.latency_label = QLabel(f"Latency: {lat_val}")
         self.latency_label.setStyleSheet(f"color: {COLORS['primary']}; font-size: 10px; margin-left: 5px;")
         chat_container.addWidget(self.latency_label)
 

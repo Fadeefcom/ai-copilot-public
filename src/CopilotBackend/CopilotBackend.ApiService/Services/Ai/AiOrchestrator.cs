@@ -28,42 +28,33 @@ public class AiOrchestrator
 
         await _contextManager.CheckAndArchiveContextAsync();
 
-        var name = modelName.Split(' ')[0];
-        var version = modelName.Split(' ')[1];
-
-        var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
-        if (provider == null) throw new ArgumentException($"Model '{modelName}' not found.");
+        var provider = _providers.FirstOrDefault(p => p.ProviderName == "Azure");
+        if (provider == null) throw new ArgumentException($"Model 'Azure' not found.");
 
         var messages = await _promptManager.BuildRequestMessagesAsync(instruction, Image != null);
-        return await provider.GenerateResponseAsync(messages, version, Image);
+        return await provider.GenerateResponseAsync(messages, modelName, Image);
     }
 
     public async Task<string> ProcessAssistRequestAsync(string modelName, string? Image)
     {
         await _contextManager.CheckAndArchiveContextAsync();
 
-        var name = modelName.Split(' ')[0];
-        var version = modelName.Split(' ')[1];
-
-        var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
-        if (provider == null) throw new ArgumentException($"Model '{modelName}' not found.");
+        var provider = _providers.FirstOrDefault(p => p.ProviderName == "Azure");
+        if (provider == null) throw new ArgumentException($"Model 'Azure' not found.");
 
         var messages = await _promptManager.BuildAssistMessagesAsync(Image != null);
-        return await provider.GenerateResponseAsync(messages, version, Image);
+        return await provider.GenerateResponseAsync(messages, modelName, Image);
     }
 
     public async Task<string> ProcessFollowupRequestAsync(string modelName, string? Image)
     {
         await _contextManager.CheckAndArchiveContextAsync();
 
-        var name = modelName.Split(' ')[0];
-        var version = modelName.Split(' ')[1];
-
-        var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
-        if (provider == null) throw new ArgumentException($"Model '{modelName}' not found.");
+        var provider = _providers.FirstOrDefault(p => p.ProviderName == "Azure");
+        if (provider == null) throw new ArgumentException($"Model 'Azure' not found.");
 
         var messages = await _promptManager.BuildFollowupMessagesAsync(Image != null);
-        return await provider.GenerateResponseAsync(messages, version, Image);
+        return await provider.GenerateResponseAsync(messages, modelName, Image);
     }
 
     public async IAsyncEnumerable<string> StreamRequestAsync(string modelName, string prompt)
@@ -74,13 +65,10 @@ public class AiOrchestrator
             yield break;
         }
 
-        var name = modelName.Split(' ')[0];
-        var version = modelName.Split(' ')[1];
-
-        var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
+        var provider = _providers.FirstOrDefault(p => p.ProviderName == "Azure");
         if (provider == null)
         {
-            yield return $"System: LLM Provider '{modelName}' not found.";
+            yield return $"System: LLM Provider 'Azure' not found.";
             yield break;
         }
 
@@ -90,7 +78,7 @@ public class AiOrchestrator
         try
         {
             var messages = await _promptManager.BuildRequestMessagesAsync(prompt, false);
-            stream = provider.StreamResponseAsync(messages, version);
+            stream = provider.StreamResponseAsync(messages, modelName);
         }
         catch (Exception ex)
         {
@@ -111,13 +99,11 @@ public class AiOrchestrator
 
     private async IAsyncEnumerable<string> StreamResponseWithVisionAsync(string modelName, List<ChatMessage> messages, string? base64Image)
     {
-        var name = modelName.Split(' ')[0];
-        var version = modelName.Split(' ')[1];
-        var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
+        var provider = _providers.FirstOrDefault(p => p.ProviderName == "Azure");
 
         if (provider == null)
         {
-            yield return $"System: Provider '{name}' not found.";
+            yield return $"System: Provider 'Azure' not found.";
             yield break;
         }
 
@@ -126,7 +112,7 @@ public class AiOrchestrator
 
         try
         {
-            stream = provider.StreamResponseAsync(messages, version, base64Image);
+            stream = provider.StreamResponseAsync(messages, modelName, base64Image);
         }
         catch (Exception ex)
         {
@@ -175,8 +161,7 @@ public class AiOrchestrator
     {
         if (string.IsNullOrWhiteSpace(transcript)) return null;
 
-        var name = modelName.Split(' ')[0];
-        var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
+        var provider = _providers.FirstOrDefault(p => p.ProviderName == "Azure");
         if (provider == null) return null;
 
         var historyMessages = _contextManager.GetMessages()
@@ -204,7 +189,7 @@ public class AiOrchestrator
 
         try
         {
-            var response = await provider.GenerateResponseAsync(messages, modelName.Split(' ')[1], null);
+            var response = await provider.GenerateResponseAsync(messages, modelName, null);
 
             if (string.IsNullOrWhiteSpace(response) ||
                 response.Trim().Equals("NO", StringComparison.OrdinalIgnoreCase) ||
