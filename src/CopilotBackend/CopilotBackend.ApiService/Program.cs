@@ -6,7 +6,6 @@ using CopilotBackend.ApiService.Services.Ai;
 using CopilotBackend.ApiService.Services.Ai.Providers;
 using CopilotBackend.ApiService.Services.Hubs;
 using Microsoft.AspNetCore.SignalR;
-using Refit;
 using Serilog;
 using Serilog.Events;
 using System.Text;
@@ -28,7 +27,7 @@ public class Program
             .CreateLogger();
 
         var backendUrl = Environment.GetEnvironmentVariable("BACKEND_URL") ?? "http://localhost:57875";
-        
+
         var builder = WebApplication.CreateBuilder(args);
 
         builder.Services.AddCors(options =>
@@ -43,44 +42,24 @@ public class Program
                 });
         });
 
-        // Configuration
         builder.Services.Configure<AiOptions>(builder.Configuration.GetSection(AiOptions.SectionName));
-        builder.Services.Configure<LlmOptions>(builder.Configuration.GetSection(LlmOptions.SectionName));
 
-        // Core Services
         builder.Services.AddSerilog();
         builder.Services.AddOpenApi();
         builder.Services.AddHttpClient();
         builder.Services.AddSignalR(options =>
-        {   
+        {
             options.AddFilter<HubErrorFilter>();
         });
 
-        // Domain Services
         builder.Services.AddSingleton<ConversationContextService>();
         builder.Services.AddSingleton<DeepgramAudioService>();
         builder.Services.AddTransient<ContextManager>();
-        builder.Services.AddTransient<IContextCompressor, LocalLlmCompressor>();
+        builder.Services.AddTransient<IContextCompressor, AzureContextCompressor>();
 
-        // AI Stack
         builder.Services.AddTransient<PromptManager>();
         builder.Services.AddTransient<AiOrchestrator>();
-        builder.Services.AddTransient<ILlmProvider, OpenAiProvider>();
-        builder.Services.AddTransient<ILlmProvider, GrokProvider>();
-
-        builder.Services.AddRefitClient<IGrokApi>()
-            .ConfigureHttpClient(c =>
-            {
-                c.BaseAddress = new Uri("https://api.x.ai/v1");
-                c.Timeout = TimeSpan.FromMinutes(5);
-            });
-
-        builder.Services.AddRefitClient<IOpenAiApi>()
-            .ConfigureHttpClient(c =>
-            {
-                c.BaseAddress = new Uri("https://api.openai.com/v1");
-                c.Timeout = TimeSpan.FromMinutes(1);
-            });
+        builder.Services.AddTransient<ILlmProvider, AzureLlmProvider>();
 
         var app = builder.Build();
 

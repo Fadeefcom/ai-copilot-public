@@ -1,5 +1,4 @@
 ﻿using CopilotBackend.ApiService.Abstractions;
-using static System.Net.Mime.MediaTypeNames;
 
 namespace CopilotBackend.ApiService.Services.Ai;
 
@@ -90,12 +89,7 @@ public class AiOrchestrator
 
         try
         {
-            var systemPrompt = await _promptManager.GetSystemPrompt();
-            var messages = new List<ChatMessage>
-            {
-                new(ChatRole.System, systemPrompt),
-                new(ChatRole.User, prompt)
-            };
+            var messages = await _promptManager.BuildRequestMessagesAsync(prompt, false);
             stream = provider.StreamResponseAsync(messages, version);
         }
         catch (Exception ex)
@@ -115,7 +109,7 @@ public class AiOrchestrator
         }
     }
 
-    private async IAsyncEnumerable<string> StreamResponseWithVisionAsync(string modelName, string prompt, string? base64Image)
+    private async IAsyncEnumerable<string> StreamResponseWithVisionAsync(string modelName, List<ChatMessage> messages, string? base64Image)
     {
         var name = modelName.Split(' ')[0];
         var version = modelName.Split(' ')[1];
@@ -132,12 +126,6 @@ public class AiOrchestrator
 
         try
         {
-            var systemPrompt = await _promptManager.GetSystemPrompt();
-            var messages = new List<ChatMessage>
-            {
-                new(ChatRole.System, systemPrompt),
-                new(ChatRole.User, prompt)
-            };
             stream = provider.StreamResponseAsync(messages, version, base64Image);
         }
         catch (Exception ex)
@@ -157,18 +145,18 @@ public class AiOrchestrator
         }
     }
 
-    private async IAsyncEnumerable<string> StreamActionWithPrompt(string modelName, string? base64Image, Task<string> promptTask)
+    private async IAsyncEnumerable<string> StreamActionWithPrompt(string modelName, string? base64Image, Task<List<ChatMessage>> promptTask)
     {
-        string? prompt = null;
+        List<ChatMessage> messages = null;
         string? errorMessage = null;
 
         try
         {
-            prompt = await promptTask;
+            messages = await promptTask;
         }
         catch (Exception ex)
         {
-            errorMessage = $"System: Failed to load prompt. {ex.Message}";
+            errorMessage = $"System: Failed to load messages. {ex.Message}";
         }
 
         if (errorMessage != null)
@@ -177,7 +165,7 @@ public class AiOrchestrator
             yield break;
         }
 
-        await foreach (var chunk in StreamResponseWithVisionAsync(modelName, prompt!, base64Image))
+        await foreach (var chunk in StreamResponseWithVisionAsync(modelName, messages!, base64Image))
         {
             yield return chunk;
         }
@@ -234,11 +222,13 @@ public class AiOrchestrator
 
     public IAsyncEnumerable<string> StreamSmartActionAsync(AiActionType actionType, string modelName, string? base64Image, string? userText = null)
     {
+        var ifImage = !string.IsNullOrWhiteSpace(base64Image);
+
         return actionType switch
         {
-            AiActionType.Assist => StreamActionWithPrompt(modelName, base64Image, _promptManager.GetAssistPromt()),
-            AiActionType.Followup => StreamActionWithPrompt(modelName, base64Image, _promptManager.GetFollowupPromt()),
-            _ => StreamResponseWithVisionAsync(modelName, userText ?? "", base64Image)
+            AiActionType.Assist => StreamActionWithPrompt(modelName, base64Image, _promptManager.BuildAssistMessagesAsync(ifImage)),    
+            AiActionType.Followup => StreamActionWithPrompt(modelName, base64Image, _promptManager.BuildFollowupMessagesAsync(ifImage)),
+            _ => StreamActionWithPrompt(modelName, base64Image, _promptManager.BuildRequestMessagesAsync(userText, ifImage))
         };
     }
 

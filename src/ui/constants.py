@@ -54,4 +54,7 @@ COLORS = {
     "text_muted": "#b0b0b6"
 }
 
-MODELS = ["Grok grok-4", "OpenAI gpt-4.1-mini", "OpenAI gpt-5-nano", "OpenAI gpt-5-mini"]
+MODELS = [
+    "Azure thinking",  # Выберет grok-4-fast-reasoning
+    "Azure fast",      # Выберет gpt-4o-mini
+]

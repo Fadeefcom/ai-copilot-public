@@ -21,7 +21,7 @@ public class GrokProvider : ILlmProvider
     {
         _api = api;
         _logger = logger;
-        _apiKey = $"Bearer {options.Value.GroqApiKey}";
+        //_apiKey = $"Bearer {options.Value.GroqApiKey}";
         _defaultModel = "grok-beta";
     }
 

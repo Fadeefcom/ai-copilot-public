@@ -25,7 +25,7 @@ public class OpenAiProvider : ILlmProvider
     {
         _api = api;
         _logger = logger;
-        _apiKey = $"Bearer {options.Value.OpenAiApiKey}";
+        //_apiKey = $"Bearer {options.Value.OpenAiApiKey}";
     }
 
     public string ProviderName => "OpenAI";
