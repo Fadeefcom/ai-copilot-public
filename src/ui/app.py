@@ -223,7 +223,6 @@ class ChatWindow(QMainWindow):
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setEnabled(False)
         
-        # Конвертируем HEX в RGBA (15% прозрачности) для ховера
         c = QColor(color_hex)
         rgba_hover = f"rgba({c.red()}, {c.green()}, {c.blue()}, 40)"
         
@@ -256,7 +255,6 @@ class ChatWindow(QMainWindow):
         return btn
 
     def update_btn_style(self, btn, color_hex, is_glow=False):
-        # В Qt QSS обводка задается через border
         border_val = f"1px solid {color_hex}" if is_glow else f"1px solid {COLORS['border']}"
         
         btn.setStyleSheet(f"""
@@ -362,17 +360,14 @@ class ChatWindow(QMainWindow):
 
     def add_message(self, text, is_user=False):
         current_width = self.chat_list.viewport().width()
-        # Создаем виджет
         widget = ChatMessage(text, is_user, max_width=current_width)
         
         item = QListWidgetItem()
-        # Убираем выделение элемента списка, чтобы была видна только наша стилизация
         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
         
         self.chat_list.addItem(item)
         self.chat_list.setItemWidget(item, widget)
         
-        # Заставляем ListWidget пересчитать размер
         item.setSizeHint(widget.sizeHint())
         self.chat_list.scrollToBottom()
         return widget
@@ -404,7 +399,7 @@ class ChatWindow(QMainWindow):
 
     def on_llm_chunk(self, chunk):
         self.stop_typing()
-        
+
         if chunk.startswith("System:"):
             self.current_stream_msg_widget = None
             self.add_message(chunk, False)
