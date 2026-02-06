@@ -62,6 +62,12 @@ public class Program
         builder.Services.AddTransient<ILlmProvider, AzureLlmProvider>();
         builder.Services.AddSingleton<LatencyMonitor>();
 
+        builder.Services.AddControllers();
+        builder.WebHost.ConfigureKestrel(options =>
+        {
+            options.Limits.MaxRequestBodySize = 10 * 1024 * 1024;
+        });
+
         var app = builder.Build();
 
         app.Urls.Clear();
@@ -72,6 +78,7 @@ public class Program
             app.MapOpenApi();
         }
 
+        app.MapControllers();
         app.MapApiRoutes();
         app.UseCors("AllowAll");
         app.MapHub<SmartHub>("/hubs/smart");

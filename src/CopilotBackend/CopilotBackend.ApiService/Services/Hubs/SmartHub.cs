@@ -46,23 +46,24 @@ public class SmartHub : Hub
         _audioService.PushAudio(speakerRole, chunk);
     }
 
-    public void UpdateVisualContext(string base64Image) => _latestScreenshots[Context.ConnectionId] = base64Image;
-
-    public async IAsyncEnumerable<string> SendMessage(string text, string model, string? image, [EnumeratorCancellation] CancellationToken ct)
+    public async IAsyncEnumerable<string> SendMessage(string text, string model, [EnumeratorCancellation] CancellationToken ct)
     {
-        var chunks = _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.System, model, image, text);
+        var effectiveImage = _latestScreenshots.GetValueOrDefault(Context.ConnectionId);
+        var chunks = _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.System, model, effectiveImage, text);
         await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
     }
 
-    public async IAsyncEnumerable<string> SendAssistRequest(string model, string? image, [EnumeratorCancellation] CancellationToken ct)
+    public async IAsyncEnumerable<string> SendAssistRequest(string model, [EnumeratorCancellation] CancellationToken ct)
     {
-        var chunks = _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.Assist, model, image);
+        var effectiveImage = _latestScreenshots.GetValueOrDefault(Context.ConnectionId);
+        var chunks = _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.Assist, model, effectiveImage);
         await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
     }
 
-    public async IAsyncEnumerable<string> SendFollowupRequest(string model, string? image, [EnumeratorCancellation] CancellationToken ct)
+    public async IAsyncEnumerable<string> SendFollowupRequest(string model, [EnumeratorCancellation] CancellationToken ct)
     {
-        var chunks = _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.Followup, model, image);
+        var effectiveImage = _latestScreenshots.GetValueOrDefault(Context.ConnectionId);
+        var chunks = _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.Followup, model, effectiveImage);
         await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
     }
 
@@ -90,6 +91,11 @@ public class SmartHub : Hub
             }
             await Task.Delay(500, ct);
         }
+    }
+
+    public static void UpdateScreenshotForConnection(string connectionId, string base64Image)
+    {
+        _latestScreenshots[connectionId] = base64Image;
     }
 
     public override Task OnDisconnectedAsync(Exception? exception)

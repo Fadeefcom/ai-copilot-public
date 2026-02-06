@@ -312,6 +312,7 @@ class ChatWindow(QMainWindow):
         self.lang_dropdown.setEnabled(False)
         
         self.signalr_worker = SignalRWorker(self.model_dropdown.currentText())
+        self.signalr_worker.screenshots_enabled = self.screenshot_check.isChecked()
         self.signalr_worker.chunk_received.connect(self.on_llm_chunk)
         self.signalr_worker.status_received.connect(lambda s: self.add_message(s, False))
         self.signalr_worker.socket_ready.connect(self.on_socket_connected)
@@ -411,19 +412,16 @@ class ChatWindow(QMainWindow):
         text = self.input_box.toPlainText().strip()
         if not text: return
         self.add_message(text, is_user=True)
-        img = self._capture_screenshot()
         self.start_typing()
-        self.signalr_worker.invoke_stream("SendMessage", [text, self.model_dropdown.currentText(), img])
+        self.signalr_worker.invoke_stream("SendMessage", [text, self.model_dropdown.currentText()])
         self.input_box.clear()
 
     def send_button_prompt(self, p_type):
         if not self.started: return
-        img = self._capture_screenshot()
-        self.signalr_worker.send_screenshot(img)
         self.add_message(self.texts[f'{p_type}_btn'], is_user=True)
         self.start_typing()
         method = {"say": "SendAssistRequest", "followup": "SendFollowupRequest", "assist": "SendMessage"}[p_type]
-        args = [self.model_dropdown.currentText(), img]
+        args = [self.model_dropdown.currentText()]
         if p_type == "assist": args.insert(0, self.texts['assist_btn'])
         self.signalr_worker.invoke_stream(method, args)
 
@@ -442,7 +440,10 @@ class ChatWindow(QMainWindow):
         if not self.current_stream_msg_widget:
             self.current_stream_msg_widget = self.add_message("", False)
             self.current_stream_text = ""
-            
+
+        scrollbar = self.chat_list.verticalScrollBar()
+        was_at_bottom = scrollbar.value() >= (scrollbar.maximum() - 20)
+
         self.current_stream_text += chunk
         self.current_stream_msg_widget.set_markdown(self.current_stream_text)
         
@@ -450,7 +451,8 @@ class ChatWindow(QMainWindow):
         if item:
             item.setSizeHint(self.current_stream_msg_widget.sizeHint())
             
-        self.chat_list.scrollToBottom()
+        if was_at_bottom:
+            self.chat_list.scrollToBottom()
 
     def start_typing(self):
         if self.typing_item: return

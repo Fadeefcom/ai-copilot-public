@@ -1,12 +1,14 @@
 import io
 import base64
 import threading
+import requests
 import numpy as np
 import pyaudiowpatch as pyaudio
 from PIL import ImageGrab
 from PyQt6.QtCore import QThread, pyqtSignal
 from signalrcore.hub_connection_builder import HubConnectionBuilder
-from constants import HUB_URL
+from urllib.parse import urlparse, parse_qs
+from constants import BACKEND_URL, HUB_URL
 
 audio_init_lock = threading.Lock()
 
@@ -19,22 +21,33 @@ class SignalRWorker(QThread):
         super().__init__()
         self.model_name = model_name
         self.connection = None
-        self.is_running = True
+        self.is_running = False
         self.screenshots_enabled = False
         self._send_lock = threading.Lock()
 
     def run(self):
-        hub_url = HUB_URL.replace("http", "ws", 1) if HUB_URL.startswith("http") else HUB_URL
+        hub_url = HUB_URL
         self.connection = HubConnectionBuilder()\
-            .with_url(hub_url, options={"skip_negotiation": True, "transport": "webSockets"})\
+            .with_url(hub_url, options={"transport": "webSockets"})\
             .with_automatic_reconnect({"type": "raw", "reconnect_interval": 5, "max_attempts": 5})\
             .build()
 
         self.connection.on_open(self._on_open)
-        self.connection.start()
+        self.connection.on_close(self._handle_disconnect)
+
+        try:
+            self.connection.start()
+            self.is_running = True 
+        except Exception as e:
+            print(f"[DEBUG] Connection failed to start: {e}")
+            self.is_running = False
+            self.connection_failed.emit()
+            return
 
         while self.is_running:
             self.msleep(100)
+            if self.connection and self.connection.transport.state.value == 0:
+                self.is_running = False
         
         if self.connection:
             self.connection.stop()
@@ -43,21 +56,54 @@ class SignalRWorker(QThread):
         self.status_received.emit("System: Socket Connected")
         self.socket_ready.emit()
         threading.Thread(target=self.screenshot_context_loop, daemon=True).start()
+    
+    def _handle_disconnect(self):
+        if self.is_running:
+            print("[DEBUG] Connection lost unexpectedly!")
+            self.is_running = False
+            self.status_received.emit("System: Connection Lost")
 
     def screenshot_context_loop(self):
         while self.is_running:
             if self.connection and self.is_running and self.screenshots_enabled:
+                conn_id = None
+                try:
+                    transport_url = getattr(self.connection.transport, 'url', '')
+                    parsed_url = urlparse(transport_url)
+                    params = parse_qs(parsed_url.query)
+                    if 'id' in params:
+                        conn_id = params['id'][0]
+                except Exception as e:
+                    print(f"[DEBUG] Error parsing ID from URL: {e}")
+
+                if not conn_id:
+                    threading.Event().wait(1.0)
+                    continue
+
                 try:
                     screenshot = ImageGrab.grab()
-                    screenshot.thumbnail((1024, 1024))
+                    screenshot.thumbnail((800, 800))
                     buf = io.BytesIO()
-                    screenshot.save(buf, format="JPEG", quality=70)
+                    screenshot.save(buf, format="JPEG", quality=60)
                     img_str = base64.b64encode(buf.getvalue()).decode("utf-8")
-                    if self.is_running:
-                        with self._send_lock:
-                            self.connection.send("UpdateVisualContext", [img_str])
-                except:
-                    pass
+
+                    payload = {
+                        "connectionId": conn_id,
+                        "base64Image": img_str
+                    }
+
+                    response = requests.post(
+                        f"{BACKEND_URL}/context/screenshot", 
+                        json=payload,
+                        timeout=5
+                    )
+                    
+                    if response.status_code != 200:
+                        print(f"REST Upload failed: {response.status_code}")
+
+                except Exception as e:
+                    print(f"REST Screenshot error: {e}")
+            
             threading.Event().wait(2.0)
 
     def start_audio(self, lang):
@@ -73,6 +119,7 @@ class SignalRWorker(QThread):
             with self._send_lock:
                 try: 
                     self.connection.send("StopAudio", [])
+                    self.is_running = False
                 except: 
                     pass
 
@@ -90,7 +137,7 @@ class SignalRWorker(QThread):
             with self._send_lock:
                 try: 
                     self.connection.send("UpdateVisualContext", [img_b64])
-                except: 
+                except:
                     pass
 
     def invoke_stream(self, method_name, args):
