@@ -68,7 +68,10 @@ public class SmartHub : Hub
         await base.OnConnectedAsync();
     }
 
-    public async Task StopAudio() => await _audioService.StopAsync();
+    public async Task StopAudio() 
+    {
+        await _audioService.StopAsync();
+    }
 
     public void SendAudioChunk(string base64Chunk, string role)
     {

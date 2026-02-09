@@ -6,5 +6,5 @@ public interface IVectorDbService
 
     Task SavePointsAsync(string collectionName, IEnumerable<(string Text, float[] Vector)> items, Guid userId, CancellationToken ct = default);
 
-    Task<List<string>> SearchAsync(string collectionName, string textQuery, float[] vector, Guid userId, int limit = 5, CancellationToken ct = default);
+    Task<List<string>> SearchAsync(string category, string textQuery, float[] vector, Guid userId, int limit = 5, CancellationToken ct = default);
 }

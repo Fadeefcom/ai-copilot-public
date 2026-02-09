@@ -288,7 +288,7 @@ public class AzureLlmProvider : ILlmProvider
 
         var messages = new List<ChatMessage>
         {
-            new(ChatRole.System, systemPrompt),
+            new(ChatRole.Developer, systemPrompt),
             new(ChatRole.User, text)
         };
 

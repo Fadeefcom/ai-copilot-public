@@ -25,7 +25,7 @@ public class AzureSearchVectorService : IVectorDbService
         var endpoint = new Uri(endpointUrl);
         var credential = new AzureKeyCredential(apiKey);
 
-        _indexName = config["VectorDb:IndexName"] ?? "copilot-memory";
+        _indexName = config["VectorDb:IndexName"] ?? throw new ArgumentNullException("VectorDb:IndexName");
         _logger = logger;
 
         _indexClient = new SearchIndexClient(endpoint, credential);
@@ -53,7 +53,7 @@ public class AzureSearchVectorService : IVectorDbService
                 new SearchField("id", SearchFieldDataType.String) { IsKey = true },
                 new SearchField("content", SearchFieldDataType.String) { IsSearchable = true },
                 new SearchField("user_id", SearchFieldDataType.String) { IsFilterable = true },
-
+                new SearchField("category", SearchFieldDataType.String) { IsSearchable = true },
                 new SearchField("embedding", SearchFieldDataType.Collection(SearchFieldDataType.Single))
                 {
                     IsSearchable = true,
@@ -79,7 +79,7 @@ public class AzureSearchVectorService : IVectorDbService
         _logger.LogInformation($"Index '{targetIndex}' created successfully.");
     }
 
-    public async Task SavePointsAsync(string collectionName, IEnumerable<(string Text, float[] Vector)> items, Guid userId, CancellationToken ct = default)
+    public async Task SavePointsAsync(string category, IEnumerable<(string Text, float[] Vector)> items, Guid userId, CancellationToken ct = default)
     {
         var batch = new IndexDocumentsBatch<SearchDocument>();
 
@@ -91,7 +91,7 @@ public class AzureSearchVectorService : IVectorDbService
                 ["content"] = text,
                 ["embedding"] = vector,
                 ["user_id"] = userId,   
-                ["metadata"] = "generated_memory"
+                ["category"] = category,
             };
 
             batch.Actions.Add(IndexDocumentsAction.Upload(doc));
@@ -104,7 +104,7 @@ public class AzureSearchVectorService : IVectorDbService
         }
     }
 
-    public async Task<List<string>> SearchAsync(string collectionName, string textQuery, float[] vector, Guid userId, int limit = 5, CancellationToken ct = default)
+    public async Task<List<string>> SearchAsync(string category, string textQuery, float[] vector, Guid userId, int limit = 5, CancellationToken ct = default)
     {
         var searchOptions = new SearchOptions
         {
@@ -122,7 +122,7 @@ public class AzureSearchVectorService : IVectorDbService
             },
         };
 
-        SearchResults<SearchDocument> response = await _searchClient.SearchAsync<SearchDocument>(textQuery  , searchOptions, ct);
+        SearchResults<SearchDocument> response = await _searchClient.SearchAsync<SearchDocument>(textQuery, searchOptions, ct);
 
         var results = new List<string>();
 
