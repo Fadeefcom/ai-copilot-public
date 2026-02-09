@@ -13,19 +13,11 @@ public class AzureContextCompressor : IContextCompressor
         _llmProvider = providers.First(p => p.ProviderName == "Azure");
     }
 
-    public async Task<string> SummarizeContextAsync(string fullTranscript)
+    public async Task<(string summary, float[] embeddings)> SummarizeContextAsync(string fullTranscript, CancellationToken ct = default)
     {
-        var systemPrompt = "You are a strictly professional, ultra-concise, and purely factual assistant. " +
-                           "Your task is to summarize the following conversation transcript. " +
-                           "Focus exclusively on key facts and decisions. " +
-                           "The summary must be brief, neutral, and delivered in a business-like style without any conversational preamble.";
+        var summary = await _llmProvider.SummarizeTextAsync(fullTranscript, ct);
+        var embeddings = await _llmProvider.GetEmbeddingAsync(fullTranscript, ct);
 
-        var messages = new List<ChatMessage>
-        {
-            new(ChatRole.System, systemPrompt),
-            new(ChatRole.User, $"TRANSCRIPT:\n{fullTranscript}")
-        };
-
-        return await _llmProvider.GenerateResponseAsync(messages, "fast");
+        return (summary, embeddings);
     }
 }

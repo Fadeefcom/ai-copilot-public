@@ -1,4 +1,5 @@
 ﻿using CopilotBackend.ApiService.Abstractions;
+using System.Text;
 
 namespace CopilotBackend.ApiService.Services.Ai;
 
@@ -6,13 +7,13 @@ public class AiOrchestrator
 {
     private readonly IEnumerable<ILlmProvider> _providers;
     private readonly PromptManager _promptManager;
-    private readonly ContextManager _contextManager;
+    private readonly ConversationContextService _contextManager;
     private readonly IAudioTranscriptionService _audioService;
 
     public AiOrchestrator(
         IEnumerable<ILlmProvider> providers,
         PromptManager promptManager,
-        ContextManager contextManager,
+        ConversationContextService contextManager,
         IAudioTranscriptionService audioService)
     {
         _providers = providers;
@@ -26,8 +27,6 @@ public class AiOrchestrator
         if (!_audioService.IsRunning)
             return "Audio capture is not running.";
 
-        await _contextManager.CheckAndArchiveContextAsync();
-
         var provider = _providers.FirstOrDefault(p => p.ProviderName == "Azure");
         if (provider == null) throw new ArgumentException($"Model 'Azure' not found.");
 
@@ -37,8 +36,6 @@ public class AiOrchestrator
 
     public async Task<string> ProcessAssistRequestAsync(string modelName, string? Image)
     {
-        await _contextManager.CheckAndArchiveContextAsync();
-
         var provider = _providers.FirstOrDefault(p => p.ProviderName == "Azure");
         if (provider == null) throw new ArgumentException($"Model 'Azure' not found.");
 
@@ -48,8 +45,6 @@ public class AiOrchestrator
 
     public async Task<string> ProcessFollowupRequestAsync(string modelName, string? Image)
     {
-        await _contextManager.CheckAndArchiveContextAsync();
-
         var provider = _providers.FirstOrDefault(p => p.ProviderName == "Azure");
         if (provider == null) throw new ArgumentException($"Model 'Azure' not found.");
 
@@ -151,10 +146,14 @@ public class AiOrchestrator
             yield break;
         }
 
+        StringBuilder responce = new StringBuilder();
         await foreach (var chunk in StreamResponseWithVisionAsync(modelName, messages!, base64Image))
         {
+            responce.AppendLine(chunk);
             yield return chunk;
         }
+        
+        _contextManager.AddAssistantMessage(responce.ToString());
     }
 
     public async Task<string?> DetectQuestionAsync(string modelName, string transcript)

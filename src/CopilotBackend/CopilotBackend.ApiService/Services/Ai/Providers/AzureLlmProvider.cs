@@ -1,13 +1,14 @@
-﻿using CopilotBackend.ApiService.Abstractions;
+﻿using Azure;
+using CopilotBackend.ApiService.Abstractions;
 using CopilotBackend.ApiService.Configuration;
 using Microsoft.Extensions.Options;
-using Polly;
+using OpenAI;
+using OpenAI.Embeddings;
 using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using static System.Net.Mime.MediaTypeNames;
 
 namespace CopilotBackend.ApiService.Services.Ai.Providers;
 
@@ -18,9 +19,9 @@ public class AzureLlmProvider : ILlmProvider
     private readonly ILogger<AzureLlmProvider> _logger;
     private readonly LatencyMonitor _latencyMonitor;
 
-    public AzureLlmProvider(HttpClient http, IOptions<AiOptions> options, ILogger<AzureLlmProvider> logger, LatencyMonitor latencyMonitor)
+    public AzureLlmProvider(IHttpClientFactory factory, IOptions<AiOptions> options, ILogger<AzureLlmProvider> logger, LatencyMonitor latencyMonitor)
     {
-        _http = http;
+        _http = factory.CreateClient("Azure");
         _options = options.Value;
         _logger = logger;
         _latencyMonitor = latencyMonitor;
@@ -243,4 +244,59 @@ public class AzureLlmProvider : ILlmProvider
         "chat" => _options.ChatDeployment,
         _ => _options.ChatDeployment
     };
+
+    public async Task<List<(string, float[])>> GetEmbeddingAsync(IEnumerable<string> chanks, CancellationToken ct = default)
+    {
+        var deployment = _options.EmbeddingDeployment;
+
+        var endpoint = new Uri(deployment.Endpoint);
+        var credential = new AzureKeyCredential(_options.ApiKey);
+        var model = deployment.Name;
+        var deploymentName = deployment.Name;
+
+        var openAIOptions = new OpenAIClientOptions()
+        {
+            Endpoint = endpoint            
+        };
+
+        var client = new EmbeddingClient(deploymentName, credential, openAIOptions);
+
+        var response = client.GenerateEmbeddings(chanks);
+
+        var result = new List<(string, float[])>(response.Value.Count);
+
+        foreach (var embedding in response.Value)
+        {
+            result.Add((chanks.ElementAt(embedding.Index), embedding.ToFloats().ToArray()));
+        }
+
+        return result;
+    }
+
+    public async Task<List<string>> SummarizeTextAsync(string text, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return [];
+
+        var systemPrompt =
+            "You are an expert conversation analyzer. Your task is to process the input transcript:\n" +
+            "1. Identify logical semantic blocks based on topic shifts (e.g., discussion about database, then switching to frontend, then to vacation plans).\n" +
+            "2. For EACH block, write a standalone, concise summary.\n" +
+            "3. Output the summaries separated strictly by the delimiter \"|||\".\n" +
+            "4. Output format example: \"Summary of topic A ||| Summary of topic B ||| Summary of topic C\"\n" +
+            "5. Do NOT include bullet points, numbering, or the original text. ONLY the summaries separated by the delimiter.";
+
+        var messages = new List<ChatMessage>
+        {
+            new(ChatRole.System, systemPrompt),
+            new(ChatRole.User, text)
+        };
+
+        var response = await GenerateResponseAsync(messages, "fast", null, ct);
+
+        return response
+            .Split(new[] { "|||" }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim())
+            .Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+    }
 }

@@ -12,6 +12,7 @@ public class AiOptions
     public DeploymentOptions ReasoningDeployment { get; set; } = new();
     public DeploymentOptions FastDeployment { get; set; } = new();
     public DeploymentOptions ChatDeployment { get; set; } = new();
+    public DeploymentOptions EmbeddingDeployment { get; set; } = new();
 }
 
 public class DeploymentOptions

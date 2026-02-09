@@ -4,6 +4,7 @@ using CopilotBackend.ApiService.Routes;
 using CopilotBackend.ApiService.Services;
 using CopilotBackend.ApiService.Services.Ai;
 using CopilotBackend.ApiService.Services.Ai.Providers;
+using CopilotBackend.ApiService.Services.Data;
 using CopilotBackend.ApiService.Services.Hubs;
 using Microsoft.AspNetCore.SignalR;
 using Serilog;
@@ -52,9 +53,9 @@ public class Program
             options.AddFilter<HubErrorFilter>();
         });
 
-        builder.Services.AddSingleton<ConversationContextService>();
+        builder.Services.AddScoped<ConversationContextService>();
         builder.Services.AddSingleton<IAudioTranscriptionService, AzureAudioService>();
-        builder.Services.AddTransient<ContextManager>();
+        builder.Services.AddSingleton<IVectorDbService, AzureSearchVectorService>();
         builder.Services.AddTransient<IContextCompressor, AzureContextCompressor>();
 
         builder.Services.AddTransient<PromptManager>();

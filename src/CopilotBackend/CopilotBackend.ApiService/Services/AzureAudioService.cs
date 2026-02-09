@@ -14,12 +14,6 @@ public class AzureAudioService : IAudioTranscriptionService
     private readonly ILogger<AzureAudioService> _logger;
     private CancellationTokenSource? _cts;
 
-    private readonly StringBuilder _companionBuffer = new();
-    private readonly object _bufferLock = new();
-
-    private readonly StringBuilder _smartModeBuffer = new();
-    private readonly object _smartModeLock = new();
-
     private readonly Dictionary<SpeakerRole, AzureStreamer> _streamers = new();
 
     public bool IsRunning => _streamers.Any(s => s.Value.IsConnected);
@@ -44,7 +38,7 @@ public class AzureAudioService : IAudioTranscriptionService
             var roles = new[] { SpeakerRole.Me, SpeakerRole.Companion };
             foreach (var role in roles)
             {
-                var streamer = new AzureStreamer(_options, _logger, _contextService, role, OnMessageReceived);
+                var streamer = new AzureStreamer(_options, _logger, _contextService, role);
                 await streamer.ConnectAsync(language);
                 _streamers[role] = streamer;
             }
@@ -87,51 +81,6 @@ public class AzureAudioService : IAudioTranscriptionService
         _logger.LogInformation("Audio services stopped.");
     }
 
-    private void OnMessageReceived(SpeakerRole role, string text)
-    {
-        if (role == SpeakerRole.Companion)
-        {
-            lock (_smartModeLock)
-            {
-                if (_smartModeBuffer.Length > 0) _smartModeBuffer.Append(" ");
-                _smartModeBuffer.Append(text);
-            }
-
-            lock (_bufferLock)
-            {
-                if (_companionBuffer.Length > 0) _companionBuffer.Append(" ");
-                _companionBuffer.Append(text);
-            }
-        }
-    }
-
-    public string PopNewText()
-    {
-        lock (_smartModeLock)
-        {
-            if (_smartModeBuffer.Length == 0) return string.Empty;
-            var text = _smartModeBuffer.ToString().Trim();
-            _smartModeBuffer.Clear();
-            return text;
-        }
-    }
-
-    public string? GetAndClearCompleteQuestion()
-    {
-        lock (_bufferLock)
-        {
-            var text = _companionBuffer.ToString();
-            int questionIndex = text.IndexOf('?');
-            if (questionIndex != -1)
-            {
-                var question = text.Substring(0, questionIndex + 1).Trim();
-                _companionBuffer.Clear();
-                return question;
-            }
-        }
-        return null;
-    }
-
     public void Clear() => _contextService.Clear();
 
     public void Dispose()
@@ -147,18 +96,16 @@ public class AzureAudioService : IAudioTranscriptionService
         private readonly ILogger _logger;
         private readonly ConversationContextService _ctx;
         private readonly SpeakerRole _role;
-        private readonly Action<SpeakerRole, string> _onMessage;
         private readonly CancellationTokenSource _cts = new();
 
         public bool IsConnected => _ws.State == WebSocketState.Open;
 
-        public AzureStreamer(AiOptions options, ILogger logger, ConversationContextService ctx, SpeakerRole role, Action<SpeakerRole, string> onMessage)
+        public AzureStreamer(AiOptions options, ILogger logger, ConversationContextService ctx, SpeakerRole role)
         {
             _options = options;
             _logger = logger;
             _ctx = ctx;
             _role = role;
-            _onMessage = onMessage;
         }
 
         public async Task ConnectAsync(string language)
@@ -278,9 +225,8 @@ public class AzureAudioService : IAudioTranscriptionService
                         var text = transcriptProp.GetString();
                         if (!string.IsNullOrWhiteSpace(text))
                         {
-                            _logger.LogInformation($"[Azure-STT] {_role}: {text}");
+                            //_logger.LogInformation($"[Azure-STT] {_role}: {text}");
                             _ctx.AddMessage(_role, text);
-                            _onMessage(_role, text);
                         }
                     }
                 }

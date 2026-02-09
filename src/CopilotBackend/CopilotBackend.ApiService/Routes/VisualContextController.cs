@@ -1,4 +1,5 @@
-﻿using CopilotBackend.ApiService.Services.Hubs;
+﻿using CopilotBackend.ApiService.Services;
+using CopilotBackend.ApiService.Services.Hubs;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CopilotBackend.ApiService.Routes;
@@ -8,10 +9,12 @@ namespace CopilotBackend.ApiService.Routes;
 public class VisualContextController : ControllerBase
 {
     private readonly ILogger<VisualContextController> _logger;
+    private readonly ConversationContextService _conversationContextService;
 
-    public VisualContextController(ILogger<VisualContextController> logger)
+    public VisualContextController(ILogger<VisualContextController> logger, ConversationContextService conversationContextService)
     {
         _logger = logger;
+        _conversationContextService = conversationContextService;
     }
 
     [HttpPost("screenshot")]
@@ -22,7 +25,7 @@ public class VisualContextController : ControllerBase
             return BadRequest();
         }
 
-        SmartHub.UpdateScreenshotForConnection(request.ConnectionId, request.Base64Image);
+        _conversationContextService.LatestScreenshot = request.Base64Image;
         return Ok();
     }
 }

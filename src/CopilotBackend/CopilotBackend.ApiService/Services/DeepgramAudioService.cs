@@ -3,7 +3,6 @@ using CopilotBackend.ApiService.Configuration;
 using Deepgram;
 using Deepgram.Models.Listen.v2.WebSocket;
 using Microsoft.Extensions.Options;
-using System.Text;
 
 namespace CopilotBackend.ApiService.Services;
 
@@ -13,12 +12,6 @@ public class DeepgramAudioService : IAudioTranscriptionService
     private readonly string _apiKey;
     private readonly ILogger<DeepgramAudioService> _logger;
     private CancellationTokenSource? _cts;
-
-    private readonly StringBuilder _companionBuffer = new();
-    private readonly object _bufferLock = new();
-
-    private readonly StringBuilder _smartModeBuffer = new();
-    private readonly object _smartModeLock = new();
 
     private readonly Dictionary<SpeakerRole, AudioStreamer> _streamers = new();
 
@@ -44,7 +37,7 @@ public class DeepgramAudioService : IAudioTranscriptionService
             var roles = new[] { SpeakerRole.Me, SpeakerRole.Companion };
             foreach (var role in roles)
             {
-                var streamer = new AudioStreamer(_apiKey, _logger, _contextService, role, OnMessageReceived);
+                var streamer = new AudioStreamer(_apiKey, _logger, _contextService, role);
                 await streamer.ConnectAsync(language);
                 _streamers[role] = streamer;
             }
@@ -88,51 +81,6 @@ public class DeepgramAudioService : IAudioTranscriptionService
         _logger.LogInformation("Audio services stopped.");
     }
 
-    private void OnMessageReceived(SpeakerRole role, string text)
-    {
-        if (role == SpeakerRole.Companion)
-        {
-            lock (_smartModeLock)
-            {
-                if (_smartModeBuffer.Length > 0) _smartModeBuffer.Append(" ");
-                _smartModeBuffer.Append(text);
-            }
-
-            lock (_bufferLock)
-            {
-                if (_companionBuffer.Length > 0) _companionBuffer.Append(" ");
-                _companionBuffer.Append(text);
-            }
-        }
-    }
-
-    public string PopNewText()
-    {
-        lock (_smartModeLock)
-        {
-            if (_smartModeBuffer.Length == 0) return string.Empty;
-            var text = _smartModeBuffer.ToString().Trim();
-            _smartModeBuffer.Clear();
-            return text;
-        }
-    }
-
-    public string? GetAndClearCompleteQuestion()
-    {
-        lock (_bufferLock)
-        {
-            var text = _companionBuffer.ToString();
-            int questionIndex = text.IndexOf('?');
-            if (questionIndex != -1)
-            {
-                var question = text.Substring(0, questionIndex + 1).Trim();
-                _companionBuffer.Clear();
-                return question;
-            }
-        }
-        return null;
-    }
-
     public void Clear() => _contextService.Clear();
 
     public void Dispose()
@@ -145,17 +93,15 @@ public class DeepgramAudioService : IAudioTranscriptionService
     {
         private readonly ListenWebSocketClient _client;
         private readonly ConversationContextService _ctx;
-        private readonly Action<SpeakerRole, string> _onMessage;
         private readonly ILogger _logger;
         private readonly SpeakerRole _role;
 
-        public AudioStreamer(string apiKey, ILogger logger, ConversationContextService ctx, SpeakerRole role, Action<SpeakerRole, string> onMessage)
+        public AudioStreamer(string apiKey, ILogger logger, ConversationContextService ctx, SpeakerRole role)
         {
             _ctx = ctx;
             _client = new ListenWebSocketClient(apiKey);
             _logger = logger;
             _role = role;
-            _onMessage = onMessage;
         }
 
         public async Task ConnectAsync(string language)
@@ -165,9 +111,8 @@ public class DeepgramAudioService : IAudioTranscriptionService
                 var transcript = e.Channel?.Alternatives?.FirstOrDefault()?.Transcript;
                 if (!string.IsNullOrWhiteSpace(transcript))
                 {
-                    _logger.LogInformation($"[Speech-to-Text] {_role}: {transcript}");
+                    //_logger.LogInformation($"[Speech-to-Text] {_role}: {transcript}");
                     _ctx.AddMessage(_role, transcript);
-                    _onMessage(_role, transcript);
                 }
             });
 

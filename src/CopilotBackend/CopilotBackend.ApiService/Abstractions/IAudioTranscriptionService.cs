@@ -8,7 +8,5 @@ public interface IAudioTranscriptionService : IDisposable
     Task StartAsync(string language);
     Task PushAudio(SpeakerRole role, byte[] data);
     Task StopAsync();
-    string PopNewText();
-    string? GetAndClearCompleteQuestion();
     void Clear();
 }

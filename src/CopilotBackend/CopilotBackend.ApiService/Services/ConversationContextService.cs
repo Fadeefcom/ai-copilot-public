@@ -14,7 +14,8 @@ public enum SpeakerRole
 {
     Me,
     Companion,
-    System
+    System,
+    Assistant
 }
 
 public class ConversationMessage
@@ -24,45 +25,50 @@ public class ConversationMessage
     public string Text { get; set; } = "";
 }
 
-public class ArchivedContext
-{
-    public DateTime ArchiveTime { get; set; }
-    public string SummaryText { get; set; } = "";
-}
-
 public class ConversationContextService
 {
     private readonly List<ConversationMessage> _history = new();
-    private readonly List<ArchivedContext> _archives = new();
     private readonly object _lock = new();
+    private readonly object _screenshotLock = new();
 
-    private readonly TimeSpan _mergeThreshold = TimeSpan.FromSeconds(5);
+    private string? _latestScreenshot;
+
+    public string? LatestScreenshot
+    {
+        get
+        {
+            lock (_screenshotLock)
+            {
+                return _latestScreenshot;
+            }
+        }
+        set
+        {
+            lock (_screenshotLock)
+            {
+                _latestScreenshot = value;
+            }
+        }
+    }
 
     public void AddMessage(SpeakerRole role, string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
 
         lock (_lock)
-        {
-            var lastMessage = _history.LastOrDefault();
-
-            if (lastMessage != null &&
-                lastMessage.Role == role &&
-                DateTime.UtcNow - lastMessage.Timestamp < _mergeThreshold)
+        {            
+            _history.Add(new ConversationMessage
             {
-                lastMessage.Text += $" {text}";
-                lastMessage.Timestamp = DateTime.UtcNow;
-            }
-            else
-            {
-                _history.Add(new ConversationMessage
-                {
-                    Timestamp = DateTime.UtcNow,
-                    Role = role,
-                    Text = text
-                });
-            }
+                Timestamp = DateTime.UtcNow,
+                Role = role,
+                Text = text
+            });
         }
+    }
+
+    public void AddAssistantMessage(string text)
+    {
+        AddMessage(SpeakerRole.Assistant, text);
     }
 
     public void Clear()
@@ -70,7 +76,6 @@ public class ConversationContextService
         lock (_lock)
         {
             _history.Clear();
-            _archives.Clear();
         }
     }
 
@@ -79,16 +84,29 @@ public class ConversationContextService
         lock (_lock)
         {
             var sb = new StringBuilder();
-
-            foreach (var archive in _archives)
-            {
-                sb.AppendLine($"[ARCHIVE {archive.ArchiveTime:HH:mm:ss}]: {archive.SummaryText}");
-            }
-
             foreach (var msg in _history)
             {
                 sb.AppendLine($"[{msg.Role} {msg.Timestamp:HH:mm:ss}]: {msg.Text}");
             }
+            return sb.ToString();
+        }
+    }
+
+    public string GetCompleteSessionTranscript()
+    {
+        lock (_lock)
+        {
+            if (_history.Count == 0) return string.Empty;
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"SESSION DUMP GENERATED AT: {DateTime.UtcNow:O}");
+            sb.AppendLine("------------------------------------------------");
+
+            foreach (var msg in _history)
+            {
+                sb.AppendLine($"[{msg.Timestamp:O}] {msg.Role}: {msg.Text}");
+            }
+
             return sb.ToString();
         }
     }
@@ -98,26 +116,26 @@ public class ConversationContextService
         lock (_lock) return _history.ToList();
     }
 
-    public void ArchiveContext(string summary)
+    public IEnumerable<ConversationMessage> GetMessages(SpeakerRole speakerRole, TimeSpan timeSpan)
     {
-        lock (_lock)
-        {
-            _archives.Add(new ArchivedContext
-            {
-                ArchiveTime = DateTime.UtcNow,
-                SummaryText = summary
-            });
-        }
-    }
+        var threshold = DateTime.UtcNow - timeSpan;
+        var result = new List<ConversationMessage>();
 
-    public void CompactHistory(int messagesToKeep = 5)
-    {
         lock (_lock)
         {
-            if (_history.Count > messagesToKeep)
+            for (int i = _history.Count - 1; i >= 0; i--)
             {
-                _history.RemoveRange(0, _history.Count - messagesToKeep);
+                var msg = _history[i];
+                if (msg.Timestamp < threshold) break;
+
+                if (msg.Role == speakerRole)
+                {
+                    result.Add(msg);
+                }
             }
         }
+
+        result.Reverse();
+        return result;
     }
 }
