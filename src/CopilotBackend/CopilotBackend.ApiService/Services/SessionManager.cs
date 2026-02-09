@@ -2,6 +2,31 @@
 
 namespace CopilotBackend.ApiService.Services;
 
+public enum ChatRole
+{
+    System,
+    User,
+    Assistant,
+    Developer
+}
+
+public enum SpeakerRole
+{
+    Me,
+    Companion,
+    System,
+    Assistant
+}
+
+public class ConversationMessage
+{
+    public DateTime Timestamp { get; set; }
+    public SpeakerRole Role { get; set; }
+    public string Text { get; set; } = "";
+}
+
+
+
 public class SessionManager
 {
     private readonly ConcurrentDictionary<Guid, UserSession> _userSessions = new();

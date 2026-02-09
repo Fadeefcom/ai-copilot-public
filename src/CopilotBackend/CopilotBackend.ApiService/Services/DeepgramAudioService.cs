@@ -8,7 +8,6 @@ namespace CopilotBackend.ApiService.Services;
 
 public class DeepgramAudioService : IAudioTranscriptionService
 {
-    private readonly ConversationContextService _contextService;
     private readonly string _apiKey;
     private readonly ILogger<DeepgramAudioService> _logger;
     private CancellationTokenSource? _cts;
@@ -19,15 +18,13 @@ public class DeepgramAudioService : IAudioTranscriptionService
 
     public DeepgramAudioService(
         IOptions<ExternalAiOptions> options,
-        ILogger<DeepgramAudioService> logger,
-        ConversationContextService contextService)
+        ILogger<DeepgramAudioService> logger)
     {
         _apiKey = options.Value.DeepgramApiKey;
         _logger = logger;
-        _contextService = contextService;
     }
 
-    public async Task StartAsync(string language)
+    public async Task StartAsync(string language, UserSession session)
     {
         if (IsRunning) return;
         _cts = new CancellationTokenSource();
@@ -37,7 +34,7 @@ public class DeepgramAudioService : IAudioTranscriptionService
             var roles = new[] { SpeakerRole.Me, SpeakerRole.Companion };
             foreach (var role in roles)
             {
-                var streamer = new AudioStreamer(_apiKey, _logger, _contextService, role);
+                var streamer = new AudioStreamer(_apiKey, _logger, session, role);
                 await streamer.ConnectAsync(language);
                 _streamers[role] = streamer;
             }
@@ -81,8 +78,6 @@ public class DeepgramAudioService : IAudioTranscriptionService
         _logger.LogInformation("Audio services stopped.");
     }
 
-    public void Clear() => _contextService.Clear();
-
     public void Dispose()
     {
         StopAsync().GetAwaiter().GetResult();
@@ -92,11 +87,11 @@ public class DeepgramAudioService : IAudioTranscriptionService
     private class AudioStreamer : IDisposable
     {
         private readonly ListenWebSocketClient _client;
-        private readonly ConversationContextService _ctx;
+        private readonly UserSession _ctx;
         private readonly ILogger _logger;
         private readonly SpeakerRole _role;
 
-        public AudioStreamer(string apiKey, ILogger logger, ConversationContextService ctx, SpeakerRole role)
+        public AudioStreamer(string apiKey, ILogger logger, UserSession ctx, SpeakerRole role)
         {
             _ctx = ctx;
             _client = new ListenWebSocketClient(apiKey);

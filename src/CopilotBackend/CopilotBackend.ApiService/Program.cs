@@ -54,7 +54,6 @@ public class Program
         });
 
         builder.Services.AddSingleton<SessionManager>();
-        builder.Services.AddScoped<ConversationContextService>();
         builder.Services.AddSingleton<IAudioTranscriptionService, AzureAudioService>();
         builder.Services.AddSingleton<IVectorDbService, AzureSearchVectorService>();
         builder.Services.AddTransient<IContextCompressor, AzureContextCompressor>();

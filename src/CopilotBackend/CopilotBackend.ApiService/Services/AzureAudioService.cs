@@ -9,7 +9,6 @@ namespace CopilotBackend.ApiService.Services;
 
 public class AzureAudioService : IAudioTranscriptionService
 {
-    private readonly ConversationContextService _contextService;
     private readonly AiOptions _options;
     private readonly ILogger<AzureAudioService> _logger;
     private CancellationTokenSource? _cts;
@@ -20,15 +19,13 @@ public class AzureAudioService : IAudioTranscriptionService
 
     public AzureAudioService(
         IOptions<AiOptions> options,
-        ILogger<AzureAudioService> logger,
-        ConversationContextService contextService)
+        ILogger<AzureAudioService> logger)
     {
         _options = options.Value;
         _logger = logger;
-        _contextService = contextService;
     }
 
-    public async Task StartAsync(string language)
+    public async Task StartAsync(string language, UserSession session)
     {
         if (IsRunning) return;
         _cts = new CancellationTokenSource();
@@ -38,7 +35,7 @@ public class AzureAudioService : IAudioTranscriptionService
             var roles = new[] { SpeakerRole.Me, SpeakerRole.Companion };
             foreach (var role in roles)
             {
-                var streamer = new AzureStreamer(_options, _logger, _contextService, role);
+                var streamer = new AzureStreamer(_options, _logger, session, role);
                 await streamer.ConnectAsync(language);
                 _streamers[role] = streamer;
             }
@@ -81,8 +78,6 @@ public class AzureAudioService : IAudioTranscriptionService
         _logger.LogInformation("Audio services stopped.");
     }
 
-    public void Clear() => _contextService.Clear();
-
     public void Dispose()
     {
         StopAsync().GetAwaiter().GetResult();
@@ -94,13 +89,13 @@ public class AzureAudioService : IAudioTranscriptionService
         private readonly ClientWebSocket _ws = new();
         private readonly AiOptions _options;
         private readonly ILogger _logger;
-        private readonly ConversationContextService _ctx;
         private readonly SpeakerRole _role;
+        private readonly UserSession _ctx;
         private readonly CancellationTokenSource _cts = new();
 
         public bool IsConnected => _ws.State == WebSocketState.Open;
 
-        public AzureStreamer(AiOptions options, ILogger logger, ConversationContextService ctx, SpeakerRole role)
+        public AzureStreamer(AiOptions options, ILogger logger, UserSession ctx, SpeakerRole role)
         {
             _options = options;
             _logger = logger;

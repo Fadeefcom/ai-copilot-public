@@ -28,7 +28,10 @@ public class SmartHub : Hub
     {
         try
         {
-            await _audioService.StartAsync(language);
+            var session = _sessionManager.GetSessionByConnectionId(Context.ConnectionId);
+            if (session == null)
+                throw new Exception("Session not found");
+            await _audioService.StartAsync(language, session);
         }
         catch (Exception ex)
         {
@@ -50,7 +53,7 @@ public class SmartHub : Hub
 
     public override async Task OnConnectedAsync()
     {
-        var userIdStr = Context.GetHttpContext()?.Request.Query["userId"].ToString();
+        var userIdStr = Context.GetHttpContext()?.Request.Query["userId"].ToString() ?? Guid.Empty.ToString();
 
         if (Guid.TryParse(userIdStr, out var userId))
         {
@@ -88,7 +91,7 @@ public class SmartHub : Hub
         }
 
         var chunks = _orchestrator.StreamSmartActionAsync(
-            session.UserId,
+            session,
             AiOrchestrator.AiActionType.System,
             model,
             session.LatestScreenshot,
@@ -108,7 +111,7 @@ public class SmartHub : Hub
         }
 
         var chunks = _orchestrator.StreamSmartActionAsync(
-            session.UserId,
+            session,
             AiOrchestrator.AiActionType.WhatToSay,
             model,
             session.LatestScreenshot,
@@ -127,7 +130,7 @@ public class SmartHub : Hub
         }
 
         var chunks = _orchestrator.StreamSmartActionAsync(
-            session.UserId,
+            session,
             AiOrchestrator.AiActionType.Assist,
             model,
             session.LatestScreenshot,
@@ -147,7 +150,7 @@ public class SmartHub : Hub
         }
 
         var chunks = _orchestrator.StreamSmartActionAsync(
-            session.UserId,
+            session,
             AiOrchestrator.AiActionType.Followup,
             model,
             session.LatestScreenshot,
@@ -210,13 +213,13 @@ public class SmartHub : Hub
                 !string.Equals(currentTextStack, lastCheckedText, StringComparison.Ordinal))
                 {
                     lastCheckedText = currentTextStack;
-                    var detectedIssue = await _orchestrator.DetectQuestionAsync(modelName, currentTextStack);
+                    var detectedIssue = await _orchestrator.DetectQuestionAsync(session, modelName, currentTextStack);
                     if (detectedIssue != null)
                     {
                         _logger.LogInformation($"[System] Intent: {detectedIssue}");
 
                         await foreach (var chunk in _orchestrator.StreamSmartActionAsync(
-                            session.UserId,
+                            session,
                             AiOrchestrator.AiActionType.System,
                             modelName,
                             session.LatestScreenshot,

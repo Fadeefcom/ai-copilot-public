@@ -7,20 +7,17 @@ public class AiOrchestrator
 {
     private readonly IEnumerable<ILlmProvider> _providers;
     private readonly PromptManager _promptManager;
-    private readonly ConversationContextService _contextManager;
     private readonly IAudioTranscriptionService _audioService;
     private readonly IVectorDbService _vectorDbService;
 
     public AiOrchestrator(
         IEnumerable<ILlmProvider> providers,
         PromptManager promptManager,
-        ConversationContextService contextManager,
         IAudioTranscriptionService audioService,
         IVectorDbService vectorDbService)
     {
         _providers = providers;
         _promptManager = promptManager;
-        _contextManager = contextManager;
         _audioService = audioService;
         _vectorDbService = vectorDbService;
     }
@@ -96,7 +93,7 @@ public class AiOrchestrator
         }
     }
 
-    public async Task<string> ProcessRequestAsync(string modelName, string instruction, string? Image)
+    public async Task<string> ProcessRequestAsync(string modelName, string instruction, UserSession session)
     {
         if (!_audioService.IsRunning)
             return "Audio capture is not running.";
@@ -104,29 +101,29 @@ public class AiOrchestrator
         var provider = _providers.FirstOrDefault(p => p.ProviderName == "Azure");
         if (provider == null) throw new ArgumentException($"Model 'Azure' not found.");
 
-        var messages = await _promptManager.BuildRequestMessagesAsync(instruction, Image != null);
-        return await provider.GenerateResponseAsync(messages, modelName, Image);
+        var messages = await _promptManager.BuildRequestMessagesAsync(session, instruction);
+        return await provider.GenerateResponseAsync(messages, modelName);
     }
 
-    public async Task<string> ProcessAssistRequestAsync(string modelName, string? Image)
+    public async Task<string> ProcessAssistRequestAsync(string modelName, UserSession session)
     {
         var provider = _providers.FirstOrDefault(p => p.ProviderName == "Azure");
         if (provider == null) throw new ArgumentException($"Model 'Azure' not found.");
 
-        var messages = await _promptManager.BuildAssistMessagesAsync(Image != null);
-        return await provider.GenerateResponseAsync(messages, modelName, Image);
+        var messages = await _promptManager.BuildAssistMessagesAsync(session);
+        return await provider.GenerateResponseAsync(messages, modelName);
     }
 
-    public async Task<string> ProcessFollowupRequestAsync(string modelName, string? Image)
+    public async Task<string> ProcessFollowupRequestAsync(string modelName, UserSession session)
     {
         var provider = _providers.FirstOrDefault(p => p.ProviderName == "Azure");
         if (provider == null) throw new ArgumentException($"Model 'Azure' not found.");
 
-        var messages = await _promptManager.BuildFollowupMessagesAsync(Image != null);
-        return await provider.GenerateResponseAsync(messages, modelName, Image);
+        var messages = await _promptManager.BuildFollowupMessagesAsync(session);
+        return await provider.GenerateResponseAsync(messages, modelName);
     }
 
-    public async IAsyncEnumerable<string> StreamRequestAsync(string modelName, string prompt)
+    public async IAsyncEnumerable<string> StreamRequestAsync(string modelName, string prompt, UserSession session)
     {
         if (!_audioService.IsRunning)
         {
@@ -146,7 +143,7 @@ public class AiOrchestrator
 
         try
         {
-            var messages = await _promptManager.BuildRequestMessagesAsync(prompt, false);
+            var messages = await _promptManager.BuildRequestMessagesAsync(session, prompt);
             stream = provider.StreamResponseAsync(messages, modelName);
         }
         catch (Exception ex)
@@ -200,7 +197,7 @@ public class AiOrchestrator
         }
     }
 
-    private async IAsyncEnumerable<string> StreamActionWithPrompt(string modelName, string? base64Image, Task<List<ChatMessage>> promptTask)
+    private async IAsyncEnumerable<string> StreamActionWithPrompt(UserSession session, string modelName, string? base64Image, Task<List<ChatMessage>> promptTask)
     {
         List<ChatMessage>? messages = null;
         string? errorMessage = null;
@@ -227,17 +224,17 @@ public class AiOrchestrator
             yield return chunk;
         }
         
-        _contextManager.AddAssistantMessage(responce.ToString());
+        session.AddAssistantMessage(responce.ToString());
     }
 
-    public async Task<string?> DetectQuestionAsync(string modelName, string transcript)
+    public async Task<string?> DetectQuestionAsync(UserSession session, string modelName, string transcript)
     {
         if (string.IsNullOrWhiteSpace(transcript)) return null;
 
         var provider = _providers.FirstOrDefault(p => p.ProviderName == "Azure");
         if (provider == null) return null;
 
-        var historyMessages = _contextManager.GetMessages()
+        var historyMessages = session.GetMessages()
             .Where(m => m.Timestamp > DateTime.UtcNow.AddMinutes(-15))
             .TakeLast(6)
             .ToList();
@@ -278,7 +275,7 @@ public class AiOrchestrator
         }
     }
 
-    public async IAsyncEnumerable<string> StreamSmartActionAsync(Guid userId, AiActionType actionType, string modelName, string? base64Image, string? userText = null, bool forceMemory = false)
+    public async IAsyncEnumerable<string> StreamSmartActionAsync(UserSession session, AiActionType actionType, string modelName, string? base64Image, string? userText = null, bool forceMemory = false)
     {
         var ifImage = !string.IsNullOrWhiteSpace(base64Image);
         string? searchQuery = null;
@@ -287,7 +284,7 @@ public class AiOrchestrator
 
         if (string.IsNullOrWhiteSpace(rawQuery))
         {
-            var lastMsgs = _contextManager.GetMessages().TakeLast(20).Select(m => m.Text);
+            var lastMsgs = session.GetMessages().TakeLast(20).Select(m => m.Text);
             rawQuery = string.Join(" ", lastMsgs);
         }
 
@@ -307,7 +304,7 @@ public class AiOrchestrator
 
         if (!string.IsNullOrWhiteSpace(searchQuery))
         {
-            retrievedContext = await RetrieveMemoryAsync(searchQuery, userId);
+            retrievedContext = await RetrieveMemoryAsync(searchQuery, session.UserId);
 
             if (retrievedContext != null)
                 yield return "System: Context found.";
@@ -317,10 +314,10 @@ public class AiOrchestrator
 
         var task = actionType switch
         {
-            AiActionType.Assist => StreamActionWithPrompt(modelName, base64Image, _promptManager.BuildAssistMessagesAsync(ifImage, retrievedContext)),
-            AiActionType.Followup => StreamActionWithPrompt(modelName, base64Image, _promptManager.BuildFollowupMessagesAsync(ifImage, retrievedContext)),
-            AiActionType.WhatToSay => StreamActionWithPrompt(modelName, base64Image, _promptManager.BuildWhatToSay(ifImage, retrievedContext)),
-            _ => StreamActionWithPrompt(modelName, base64Image, _promptManager.BuildRequestMessagesAsync(userText ?? string.Empty, ifImage , retrievedContext))
+            AiActionType.Assist => StreamActionWithPrompt(session, modelName, base64Image, _promptManager.BuildAssistMessagesAsync(session, retrievedContext)),
+            AiActionType.Followup => StreamActionWithPrompt(session, modelName, base64Image, _promptManager.BuildFollowupMessagesAsync(session, retrievedContext)),
+            AiActionType.WhatToSay => StreamActionWithPrompt(session, modelName, base64Image, _promptManager.BuildWhatToSay(session, retrievedContext)),
+            _ => StreamActionWithPrompt(session, modelName, base64Image, _promptManager.BuildRequestMessagesAsync(session, userText ?? string.Empty , retrievedContext))
         };
 
         await foreach (var chunk in task)

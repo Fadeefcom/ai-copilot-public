@@ -9,9 +9,9 @@ namespace CopilotBackend.ApiService.Routes;
 public class VisualContextController : ControllerBase
 {
     private readonly ILogger<VisualContextController> _logger;
-    private readonly ConversationContextService _conversationContextService;
+    private readonly SessionManager _conversationContextService;
 
-    public VisualContextController(ILogger<VisualContextController> logger, ConversationContextService conversationContextService)
+    public VisualContextController(ILogger<VisualContextController> logger, SessionManager conversationContextService)
     {
         _logger = logger;
         _conversationContextService = conversationContextService;
@@ -25,8 +25,14 @@ public class VisualContextController : ControllerBase
             return BadRequest();
         }
 
-        _conversationContextService.LatestScreenshot = request.Base64Image;
-        return Ok();
+        var session = _conversationContextService.GetSessionByConnectionId(request.ConnectionId);
+        if (session != null)        {
+
+            session.LatestScreenshot = request.Base64Image;
+            return Ok();
+        }
+
+        return BadRequest();
     }
 }
 

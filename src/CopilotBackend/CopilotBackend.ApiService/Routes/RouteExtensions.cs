@@ -1,8 +1,6 @@
-﻿using CopilotBackend.ApiService.Abstractions;
-using CopilotBackend.ApiService.Configuration;
+﻿using CopilotBackend.ApiService.Configuration;
 using CopilotBackend.ApiService.Services;
 using CopilotBackend.ApiService.Services.Ai;
-using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -52,11 +50,15 @@ public static class RouteExtensions
 
         api.MapGet("/metrics", () => Results.Ok(new { latency_ms = 42 }));
 
-        api.MapPost("/message", async ([FromBody] MessageRequest req, [FromServices] AiOrchestrator orchestrator) =>
+        api.MapPost("/message", async ([FromBody] MessageRequest req, [FromServices] AiOrchestrator orchestrator, [FromServices] SessionManager sessionManager) =>
         {
             try
             {
-                var response = await orchestrator.ProcessRequestAsync(req.Model, req.Text, req.Image);
+                var session = sessionManager.GetSession(Guid.Empty);
+                if (session == null)
+                    return Results.BadRequest();
+
+                var response = await orchestrator.ProcessRequestAsync(req.Model, req.Text, session);
                 return Results.Ok(new { Response = response });
             }
             catch (ArgumentException ex)
@@ -65,11 +67,15 @@ public static class RouteExtensions
             }
         });
 
-        api.MapPost("/assist", async ([FromBody] AiRequest req, [FromServices] AiOrchestrator orchestrator) =>
+        api.MapPost("/assist", async ([FromBody] AiRequest req, [FromServices] AiOrchestrator orchestrator, [FromServices] SessionManager sessionManager) =>
         {
             try
             {
-                var response = await orchestrator.ProcessAssistRequestAsync(req.Model, req.Image);
+                var session = sessionManager.GetSession(Guid.Empty);
+                if (session == null)
+                    return Results.BadRequest();
+
+                var response = await orchestrator.ProcessAssistRequestAsync(req.Model, session);
                 return Results.Ok(new { Response = response });
             }
             catch (ArgumentException ex)
@@ -78,30 +84,21 @@ public static class RouteExtensions
             }
         });
 
-        api.MapPost("/followup", async ([FromBody] AiRequest req, [FromServices] AiOrchestrator orchestrator) =>
+        api.MapPost("/followup", async ([FromBody] AiRequest req, [FromServices] AiOrchestrator orchestrator, [FromServices] SessionManager sessionManager) =>
         {
             try
             {
-                var response = await orchestrator.ProcessFollowupRequestAsync(req.Model, req.Image);
+                var session = sessionManager.GetSession(Guid.Empty);
+                if (session == null)
+                    return Results.BadRequest();
+
+                var response = await orchestrator.ProcessFollowupRequestAsync(req.Model, session);
                 return Results.Ok(new { Response = response });
             }
             catch (ArgumentException ex)
             {
                 return Results.BadRequest(new { Error = ex.Message });
             }
-        });
-
-        api.MapPost("/audio/start", async ([FromServices] IAudioTranscriptionService svc, [FromQuery] string language = "ru") =>
-        {
-            await svc.StartAsync(language);
-            return Results.Ok(new { status = "started" });
-        });
-
-        api.MapPost("/audio/stop", async ([FromServices] IAudioTranscriptionService svc) =>
-        {
-            await svc.StopAsync();
-            svc.Clear();
-            return Results.Ok(new { status = "stopped" });
         });
     }
 

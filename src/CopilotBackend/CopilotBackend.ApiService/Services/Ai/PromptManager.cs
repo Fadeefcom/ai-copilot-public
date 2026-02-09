@@ -5,7 +5,6 @@ namespace CopilotBackend.ApiService.Services.Ai;
 
 public class PromptManager
 {
-    private readonly ConversationContextService _contextService;
     private readonly string _promptsFolder;
     private readonly string _userContextFile = "user.md";
     private readonly string _systemPromptFile = "system.md";
@@ -13,17 +12,17 @@ public class PromptManager
     private readonly string _followupPromptFile = "followup.md";
     private readonly string _whatToSayPromtFile = "whatsay.md";
 
-    public PromptManager(ConversationContextService contextService, IWebHostEnvironment env)
+    public PromptManager(IWebHostEnvironment env)
     {
-        _contextService = contextService;
         _promptsFolder = Path.Combine(env.ContentRootPath, "promts");
     }
 
-    public async Task<List<ChatMessage>> BuildAssistMessagesAsync(bool ifImage = false, string? retrievedContext = null)
+    public async Task<List<ChatMessage>> BuildAssistMessagesAsync(UserSession session, string? retrievedContext = null)
     {
         var systemPrompt = await LoadPromptAsync(_assistPromptFile);
         var userPersona = await LoadPromptAsync(_userContextFile);
-        var dialogueHistory = _contextService.GetFormattedLog();
+        var dialogueHistory = session.GetFormattedLog();
+        var ifImage = !string.IsNullOrEmpty(session.LatestScreenshot);
 
         var fullSystemMessage = new StringBuilder()
             .AppendLine("--- SYSTEM INSTRUCTIONS ---")
@@ -64,10 +63,11 @@ public class PromptManager
         };
     }
 
-    public async Task<List<ChatMessage>> BuildFollowupMessagesAsync(bool ifImage = false, string? retrievedContext = null)
+    public async Task<List<ChatMessage>> BuildFollowupMessagesAsync(UserSession session, string? retrievedContext = null)
     {
         var systemPrompt = await LoadPromptAsync(_followupPromptFile);
-        var dialogueHistory = _contextService.GetFormattedLog();
+        var dialogueHistory = session.GetFormattedLog();
+        var ifImage = !string.IsNullOrEmpty(session.LatestScreenshot);
 
         var fullSystemMessage = new StringBuilder()
             .AppendLine("--- SYSTEM INSTRUCTIONS ---")
@@ -105,10 +105,11 @@ public class PromptManager
         };
     }
 
-    public async Task<List<ChatMessage>> BuildWhatToSay(bool ifImage = false, string? retrievedContext = null)
+    public async Task<List<ChatMessage>> BuildWhatToSay(UserSession session, string? retrievedContext = null)
     {
         var systemPrompt = await LoadPromptAsync(_whatToSayPromtFile);
-        var dialogueHistory = _contextService.GetFormattedLog();
+        var dialogueHistory = session.GetFormattedLog();
+        var ifImage = !string.IsNullOrEmpty(session.LatestScreenshot);
 
         var fullSystemMessage = new StringBuilder()
             .AppendLine("--- SYSTEM INSTRUCTIONS ---")
@@ -146,10 +147,11 @@ public class PromptManager
         };
     }
 
-    public async Task<List<ChatMessage>> BuildRequestMessagesAsync(string userInstruction, bool ifImage = false, string? retrievedContext = null)
+    public async Task<List<ChatMessage>> BuildRequestMessagesAsync(UserSession session, string userInstruction, string? retrievedContext = null)
     {
         var userPersona = await LoadPromptAsync(_userContextFile);
-        var dialogueHistory = _contextService.GetFormattedLog();
+        var dialogueHistory = session.GetFormattedLog();
+        var ifImage = !string.IsNullOrEmpty(session.LatestScreenshot);
 
         var fullSystemMessage = new StringBuilder()
             .AppendLine("--- SYSTEM INSTRUCTIONS ---")
