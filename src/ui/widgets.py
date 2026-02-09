@@ -79,8 +79,7 @@ class ChatMessage(QFrame):
         return QSize(self.label.width(), self.label.heightForWidth(self.label.width()) + extra)
     
     def update_width(self, new_width):
-        self.label.setMinimumWidth(0)
-        self.label.setMaximumWidth(16777215)
+        new_width = new_width - 15
 
         if self.is_user:
             self.label.setMaximumWidth(int(new_width * 0.75))
