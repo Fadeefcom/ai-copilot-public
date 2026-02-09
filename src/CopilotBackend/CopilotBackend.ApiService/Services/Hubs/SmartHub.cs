@@ -53,7 +53,10 @@ public class SmartHub : Hub
 
     public override async Task OnConnectedAsync()
     {
-        var userIdStr = Context.GetHttpContext()?.Request.Query["userId"].ToString() ?? Guid.Empty.ToString();
+        var userIdStr = Context.GetHttpContext()?.Request.Query["userId"].ToString();
+
+        if (string.IsNullOrWhiteSpace(userIdStr))
+            userIdStr = Guid.Empty.ToString();
 
         if (Guid.TryParse(userIdStr, out var userId))
         {

@@ -6,6 +6,7 @@ using CopilotBackend.ApiService.Services.Ai;
 using CopilotBackend.ApiService.Services.Ai.Providers;
 using CopilotBackend.ApiService.Services.Data;
 using CopilotBackend.ApiService.Services.Hubs;
+using CopilotBackend.ApiService.Workers;
 using Microsoft.AspNetCore.SignalR;
 using Serilog;
 using Serilog.Events;
@@ -62,6 +63,8 @@ public class Program
         builder.Services.AddTransient<AiOrchestrator>();
         builder.Services.AddTransient<ILlmProvider, AzureLlmProvider>();
         builder.Services.AddSingleton<LatencyMonitor>();
+        builder.Services.AddSingleton<BackgroundStackWorker>(); 
+        builder.Services.AddHostedService(provider => provider.GetRequiredService<BackgroundStackWorker>());
 
         builder.Services.AddControllers();
         builder.WebHost.ConfigureKestrel(options =>
