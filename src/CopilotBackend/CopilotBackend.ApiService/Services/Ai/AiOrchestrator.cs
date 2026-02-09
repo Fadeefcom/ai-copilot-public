@@ -9,17 +9,91 @@ public class AiOrchestrator
     private readonly PromptManager _promptManager;
     private readonly ConversationContextService _contextManager;
     private readonly IAudioTranscriptionService _audioService;
+    private readonly IVectorDbService _vectorDbService;
 
     public AiOrchestrator(
         IEnumerable<ILlmProvider> providers,
         PromptManager promptManager,
         ConversationContextService contextManager,
-        IAudioTranscriptionService audioService)
+        IAudioTranscriptionService audioService,
+        IVectorDbService vectorDbService)
     {
         _providers = providers;
         _promptManager = promptManager;
         _contextManager = contextManager;
         _audioService = audioService;
+        _vectorDbService = vectorDbService;
+    }
+
+    private async Task<string?> RetrieveMemoryAsync(string query, Guid userId)
+    {
+        if (string.IsNullOrWhiteSpace(query) || userId == Guid.Empty) return null;
+
+        var provider = _providers.FirstOrDefault(p => p.ProviderName == "Azure");
+        if (provider == null) return null;
+
+        try
+        {
+            var embeddings = await provider.GetEmbeddingAsync(new[] { query });
+            if (embeddings.Count == 0) return null;
+
+            var vector = embeddings[0].Item2;
+
+            var results = await _vectorDbService.SearchAsync("copilot-memory", query, vector, userId, limit: 3);
+
+            if (results.Count == 0) return null;
+
+            return string.Join("\n\n", results.Select((r, i) => $"[Memory {i + 1}]: {r}"));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Orchestrator] Memory search failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    private async Task<string?> DetectMemorySearchQueryAsync(string userQuery)
+    {
+        if (string.IsNullOrWhiteSpace(userQuery)) return null;
+
+        var provider = _providers.FirstOrDefault(p => p.ProviderName == "Azure");
+        if (provider == null) return null;
+
+        var systemPrompt =
+            "You are a Search Query Optimizer for a vector database.\n" +
+            "Your Task:\n" +
+            "1. Analyze the user's input to determine if they need information from Long-Term Memory (specific projects, past conversations, biography, stored facts).\n" +
+            "2. IF NO SEARCH NEEDED (general chit-chat, basic coding questions, math): Output 'NO'.\n" +
+            "3. IF SEARCH NEEDED: Formulate a concise, keyword-rich search query best suited for retrieval.\n\n" +
+            "Examples:\n" +
+            "User: \"What was the error in the last deployment?\" -> Output: \"deployment error log exception\"\n" +
+            "User: \"Remind me about architecture\" -> Output: \"project architecture design\"\n" +
+            "User: \"Hi, how are you?\" -> Output: \"NO\"\n" +
+            "User: \"Write a binary search in C#\" -> Output: \"NO\"";
+
+        var messages = new List<ChatMessage>
+        {
+            new(ChatRole.System, systemPrompt),
+            new(ChatRole.User, userQuery)
+        };
+
+        try
+        {
+            var response = await provider.GenerateResponseAsync(messages, "fast");
+            var cleaned = response.Trim();
+
+            if (cleaned.Equals("NO", StringComparison.OrdinalIgnoreCase) ||
+                cleaned.StartsWith("NO.", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            return cleaned.Replace("\"", "").Trim();
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public async Task<string> ProcessRequestAsync(string modelName, string instruction, string? Image)
@@ -128,7 +202,7 @@ public class AiOrchestrator
 
     private async IAsyncEnumerable<string> StreamActionWithPrompt(string modelName, string? base64Image, Task<List<ChatMessage>> promptTask)
     {
-        List<ChatMessage> messages = null;
+        List<ChatMessage>? messages = null;
         string? errorMessage = null;
 
         try
@@ -204,22 +278,62 @@ public class AiOrchestrator
         }
     }
 
-    public IAsyncEnumerable<string> StreamSmartActionAsync(AiActionType actionType, string modelName, string? base64Image, string? userText = null)
+    public async IAsyncEnumerable<string> StreamSmartActionAsync(Guid userId, AiActionType actionType, string modelName, string? base64Image, string? userText = null, bool forceMemory = false)
     {
         var ifImage = !string.IsNullOrWhiteSpace(base64Image);
+        string? searchQuery = null;
+        string? retrievedContext = null;
+        string? rawQuery = userText;
 
-        return actionType switch
+        if (string.IsNullOrWhiteSpace(rawQuery))
         {
-            AiActionType.Assist => StreamActionWithPrompt(modelName, base64Image, _promptManager.BuildAssistMessagesAsync(ifImage)),    
-            AiActionType.Followup => StreamActionWithPrompt(modelName, base64Image, _promptManager.BuildFollowupMessagesAsync(ifImage)),
-            _ => StreamActionWithPrompt(modelName, base64Image, _promptManager.BuildRequestMessagesAsync(userText, ifImage))
+            var lastMsgs = _contextManager.GetMessages().TakeLast(20).Select(m => m.Text);
+            rawQuery = string.Join(" ", lastMsgs);
+        }
+
+        if (forceMemory && !string.IsNullOrWhiteSpace(rawQuery))
+        {
+            searchQuery = rawQuery;
+            yield return "System: Memory search forced.";
+        }
+        else if (!string.IsNullOrWhiteSpace(rawQuery))
+        {
+            searchQuery = await DetectMemorySearchQueryAsync(rawQuery);
+            if (searchQuery != null)
+            {
+                yield return $"System: Auto-detected search intent. Query: \"{searchQuery}\"";
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(searchQuery))
+        {
+            retrievedContext = await RetrieveMemoryAsync(searchQuery, userId);
+
+            if (retrievedContext != null)
+                yield return "System: Context found.";
+            else if (forceMemory)
+                yield return "System: Nothing found in memory.";
+        }
+
+        var task = actionType switch
+        {
+            AiActionType.Assist => StreamActionWithPrompt(modelName, base64Image, _promptManager.BuildAssistMessagesAsync(ifImage, retrievedContext)),
+            AiActionType.Followup => StreamActionWithPrompt(modelName, base64Image, _promptManager.BuildFollowupMessagesAsync(ifImage, retrievedContext)),
+            AiActionType.WhatToSay => StreamActionWithPrompt(modelName, base64Image, _promptManager.BuildWhatToSay(ifImage, retrievedContext)),
+            _ => StreamActionWithPrompt(modelName, base64Image, _promptManager.BuildRequestMessagesAsync(userText ?? string.Empty, ifImage , retrievedContext))
         };
+
+        await foreach (var chunk in task)
+        {
+            yield return chunk;
+        }
     }
 
     public enum AiActionType
     {
         System,
         Assist,
-        Followup
+        Followup,
+        WhatToSay
     }
 }

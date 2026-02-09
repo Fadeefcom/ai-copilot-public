@@ -13,11 +13,11 @@ public class AzureContextCompressor : IContextCompressor
         _llmProvider = providers.First(p => p.ProviderName == "Azure");
     }
 
-    public async Task<(string summary, float[] embeddings)> SummarizeContextAsync(string fullTranscript, CancellationToken ct = default)
+    public async Task<List<(string summary, float[] embeddings)>> SummarizeContextAsync(string fullTranscript, CancellationToken ct = default)
     {
         var summary = await _llmProvider.SummarizeTextAsync(fullTranscript, ct);
-        var embeddings = await _llmProvider.GetEmbeddingAsync(fullTranscript, ct);
+        var embeddings = await _llmProvider.GetEmbeddingAsync(summary, ct);
 
-        return (summary, embeddings);
+        return embeddings;
     }
 }

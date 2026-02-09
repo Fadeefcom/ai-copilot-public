@@ -2,5 +2,5 @@
 
 public interface IContextCompressor
 {
-    Task<(string summary, float[] embeddings)> SummarizeContextAsync(string fullTranscript, CancellationToken ct = default);
+    Task<List<(string summary, float[] embeddings)>> SummarizeContextAsync(string fullTranscript, CancellationToken ct = default);
 }

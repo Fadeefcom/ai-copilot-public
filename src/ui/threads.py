@@ -62,6 +62,14 @@ class SignalRWorker(QThread):
             print("[DEBUG] Connection lost unexpectedly!")
             self.is_running = False
             self.status_received.emit("System: Connection Lost")
+    
+    def set_force_memory(self, enabled):
+        if self.connection and self.is_running: 
+            with self._send_lock:
+                try:
+                    self.connection.send("SetForceMemory", [enabled])
+                except:
+                    pass
 
     def screenshot_context_loop(self):
         while self.is_running:

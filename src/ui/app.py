@@ -216,11 +216,16 @@ class ChatWindow(QMainWindow):
         self.screenshot_check = QCheckBox("Screenshots")
         self.screenshot_check.stateChanged.connect(self._update_screenshot_status)
         self.smart_mode_check = QCheckBox("Smart Mode")
-        self.smart_mode_check.stateChanged.connect(self._update_smart_mode_status)  
+        self.smart_mode_check.stateChanged.connect(self._update_smart_mode_status)
+
+        self.force_memory_check = QCheckBox("Force Memory") 
+        self.force_memory_check.setStyleSheet(f"color: {COLORS['success']};")
+        self.force_memory_check.stateChanged.connect(self._update_force_memory)
 
         sidebar_layout.addWidget(side_title)
         sidebar_layout.addWidget(self.screenshot_check)
         sidebar_layout.addWidget(self.smart_mode_check)
+        sidebar_layout.addWidget(self.force_memory_check)
         sidebar_layout.addStretch()
 
         content_area.addLayout(chat_container, 1)
@@ -322,6 +327,7 @@ class ChatWindow(QMainWindow):
         selected_lang = self.lang_dropdown.currentText()
         lang = 'ru' if selected_lang == 'ru' else 'en'
         self.signalr_worker.start_audio(lang)
+        self.signalr_worker.set_force_memory(self.force_memory_check.isChecked())
         
         self.mic_thread = AudioCaptureThread(self.signalr_worker, role="me")
         self.mic_thread.start()
@@ -342,6 +348,11 @@ class ChatWindow(QMainWindow):
             model = self.model_dropdown.currentText()
             self.add_message("System: Smart Mode Activated", False)
             self.signalr_worker.invoke_stream("StreamSmartMode", [model])
+
+    def _update_force_memory(self):
+        if not self.started or not self.signalr_worker:
+            return
+        self.signalr_worker.set_force_memory(self.force_memory_check.isChecked())
     
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -420,7 +431,7 @@ class ChatWindow(QMainWindow):
         if not self.started: return
         self.add_message(self.texts[f'{p_type}_btn'], is_user=True)
         self.start_typing()
-        method = {"say": "SendAssistRequest", "followup": "SendFollowupRequest", "assist": "SendMessage"}[p_type]
+        method = {"say": "SendWhatToSay", "followup": "SendFollowupRequest", "assist": "SendAssistRequest"}[p_type]
         args = [self.model_dropdown.currentText()]
         if p_type == "assist": args.insert(0, self.texts['assist_btn'])
         self.signalr_worker.invoke_stream(method, args)

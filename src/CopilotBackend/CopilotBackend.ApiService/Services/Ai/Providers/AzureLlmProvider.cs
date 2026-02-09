@@ -261,7 +261,7 @@ public class AzureLlmProvider : ILlmProvider
 
         var client = new EmbeddingClient(deploymentName, credential, openAIOptions);
 
-        var response = client.GenerateEmbeddings(chanks);
+        var response = await client.GenerateEmbeddingsAsync(chanks);
 
         var result = new List<(string, float[])>(response.Value.Count);
 

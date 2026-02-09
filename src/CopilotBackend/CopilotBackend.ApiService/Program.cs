@@ -53,6 +53,7 @@ public class Program
             options.AddFilter<HubErrorFilter>();
         });
 
+        builder.Services.AddSingleton<SessionManager>();
         builder.Services.AddScoped<ConversationContextService>();
         builder.Services.AddSingleton<IAudioTranscriptionService, AzureAudioService>();
         builder.Services.AddSingleton<IVectorDbService, AzureSearchVectorService>();

@@ -1,4 +1,5 @@
 ﻿using CopilotBackend.ApiService.Abstractions;
+using CopilotBackend.ApiService.Services;
 using CopilotBackend.ApiService.Services.Ai;
 using CopilotBackend.ApiService.Workers;
 using Microsoft.AspNetCore.SignalR;
@@ -11,15 +12,15 @@ public class SmartHub : Hub
     private readonly AiOrchestrator _orchestrator;
     private readonly IAudioTranscriptionService _audioService;
     private readonly ILogger<SmartHub> _logger;
-    private readonly ConversationContextService _conversationContextService;
+    private readonly SessionManager _sessionManager;
     private readonly BackgroundStackWorker _worker;
 
-    public SmartHub(AiOrchestrator orchestrator, IAudioTranscriptionService audioService, BackgroundStackWorker worker, ILogger<SmartHub> logger, ConversationContextService conversationContextService)
+    public SmartHub(AiOrchestrator orchestrator, IAudioTranscriptionService audioService, BackgroundStackWorker worker, ILogger<SmartHub> logger, SessionManager sessionManager)
     {
         _orchestrator = orchestrator;
         _audioService = audioService;
         _logger = logger;
-        _conversationContextService = conversationContextService;
+        _sessionManager = sessionManager;
         _worker = worker;
     }
 
@@ -36,10 +37,26 @@ public class SmartHub : Hub
         }
     }
 
+    public Task SetForceMemory(bool isEnabled)
+    {
+        var session = _sessionManager.GetSessionByConnectionId(Context.ConnectionId);
+        if (session != null)
+        {
+            session.IsMemoryForceEnabled = isEnabled;
+            _logger.LogInformation($"[SmartHub] Memory Force Mode set to: {isEnabled}");
+        }
+        return Task.CompletedTask;
+    }
+
     public override async Task OnConnectedAsync()
     {
-        var userId = Context.GetHttpContext()?.Request.Query["userId"].ToString();
-        Context.Items["UserId"] = Guid.Empty;
+        var userIdStr = Context.GetHttpContext()?.Request.Query["userId"].ToString();
+
+        if (Guid.TryParse(userIdStr, out var userId))
+        {
+            _sessionManager.CreateOrGetSession(userId, Context.ConnectionId);
+            Context.Items["UserId"] = userId;
+        }
 
         _logger.LogInformation($"Client connected: {Context.ConnectionId}, User: {Context.Items["UserId"]}");
         await base.OnConnectedAsync();
@@ -56,31 +73,102 @@ public class SmartHub : Hub
         _audioService.PushAudio(speakerRole, chunk);
     }
 
+    private UserSession? GetCurrentSession()
+    {
+        return _sessionManager.GetSessionByConnectionId(Context.ConnectionId);
+    }
+
     public async IAsyncEnumerable<string> SendMessage(string text, string model, [EnumeratorCancellation] CancellationToken ct)
     {
-        var effectiveImage = _conversationContextService.LatestScreenshot;
-        var chunks = _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.System, model, effectiveImage, text);
+        var session = GetCurrentSession();
+        if (session == null)
+        {
+            yield return "System: Error - Session not found.";
+            yield break;
+        }
+
+        var chunks = _orchestrator.StreamSmartActionAsync(
+            session.UserId,
+            AiOrchestrator.AiActionType.System,
+            model,
+            session.LatestScreenshot,
+            text,
+            session.IsMemoryForceEnabled);
+
+        await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
+    }
+
+    public async IAsyncEnumerable<string> SendWhatToSay(string model, [EnumeratorCancellation] CancellationToken ct)
+    {
+        var session = GetCurrentSession();
+        if (session == null)
+        {
+            yield return "System: Error - Session not found.";
+            yield break;
+        }
+
+        var chunks = _orchestrator.StreamSmartActionAsync(
+            session.UserId,
+            AiOrchestrator.AiActionType.WhatToSay,
+            model,
+            session.LatestScreenshot,
+            forceMemory: session.IsMemoryForceEnabled);
+
         await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
     }
 
     public async IAsyncEnumerable<string> SendAssistRequest(string model, [EnumeratorCancellation] CancellationToken ct)
     {
-        var effectiveImage = _conversationContextService.LatestScreenshot;
-        var chunks = _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.Assist, model, effectiveImage);
+        var session = GetCurrentSession();
+        if (session == null)
+        {
+            yield return "System: Error - Session not found.";
+            yield break;
+        }
+
+        var chunks = _orchestrator.StreamSmartActionAsync(
+            session.UserId,
+            AiOrchestrator.AiActionType.Assist,
+            model,
+            session.LatestScreenshot,
+            null,
+            session.IsMemoryForceEnabled);
+
         await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
     }
 
     public async IAsyncEnumerable<string> SendFollowupRequest(string model, [EnumeratorCancellation] CancellationToken ct)
     {
-        var effectiveImage = _conversationContextService.LatestScreenshot;
-        var chunks = _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.Followup, model, effectiveImage);
+        var session = GetCurrentSession();
+        if (session == null)
+        {
+            yield return "System: Error - Session not found.";
+            yield break;
+        }
+
+        var chunks = _orchestrator.StreamSmartActionAsync(
+            session.UserId,
+            AiOrchestrator.AiActionType.Followup,
+            model,
+            session.LatestScreenshot,
+            null,
+            session.IsMemoryForceEnabled);
+
         await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
     }
 
     public async IAsyncEnumerable<string> StreamSmartMode(string modelName, [EnumeratorCancellation] CancellationToken ct)
     {
         _logger.LogInformation($"[SmartHub] Smart Mode started: {Context.ConnectionId}");
-        List<ConversationMessage> localBuffer = new ();
+
+        var session = GetCurrentSession();
+        if (session == null)
+        {
+            yield return "System: Error - Session not found.";
+            yield break;
+        }
+
+        List<ConversationMessage> localBuffer = new();
         var threshold = DateTime.UtcNow.AddMinutes(-5);
         var lastCheckedText = string.Empty;
 
@@ -100,16 +188,13 @@ public class SmartHub : Hub
             IEnumerable<ConversationMessage> newMessages;
             if (localBuffer.Count == 0)
             {
-                newMessages = _conversationContextService.GetMessages(SpeakerRole.Companion, TimeSpan.FromMinutes(5));
+                newMessages = session.GetMessages().Where(m => m.Role == SpeakerRole.Companion && m.Timestamp >= DateTime.UtcNow.AddMinutes(-5));
             }
             else
             {
                 var lastMsgTime = localBuffer.Max(m => m.Timestamp);
-                var timeSinceLast = DateTime.UtcNow - lastMsgTime;
-
-                var rawNew = _conversationContextService.GetMessages(SpeakerRole.Companion, timeSinceLast + TimeSpan.FromSeconds(1));
-
-                newMessages = rawNew.Where(m => m.Timestamp > lastMsgTime);
+                var msgs = session.GetMessages();
+                newMessages = msgs.Where(m => m.Role == SpeakerRole.Companion && m.Timestamp > lastMsgTime);
             }
 
             if (newMessages.Any())
@@ -129,9 +214,14 @@ public class SmartHub : Hub
                     if (detectedIssue != null)
                     {
                         _logger.LogInformation($"[System] Intent: {detectedIssue}");
-                        var img = _conversationContextService.LatestScreenshot;
 
-                        await foreach (var chunk in _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.System, modelName, img, detectedIssue).WithCancellation(ct))
+                        await foreach (var chunk in _orchestrator.StreamSmartActionAsync(
+                            session.UserId,
+                            AiOrchestrator.AiActionType.System,
+                            modelName,
+                            session.LatestScreenshot,
+                            detectedIssue,
+                            session.IsMemoryForceEnabled).WithCancellation(ct))
                         {
                             yield return chunk;
                         }
@@ -146,27 +236,23 @@ public class SmartHub : Hub
     {
         try
         {
-            var userId = Context.Items["UserId"]?.ToString();
-
-            if (string.IsNullOrWhiteSpace(userId) || !Guid.TryParse(userId, out var formattedId))
+            var session = GetCurrentSession();
+            if (session != null)
             {
-                await base.OnDisconnectedAsync(exception);
-                return;
-            }
+                var transcript = session.GetCompleteSessionTranscript();
 
-            var transcript = _conversationContextService.GetCompleteSessionTranscript();
+                if (!string.IsNullOrWhiteSpace(transcript))
+                {
+                    _logger.LogInformation($"[Session End] Sending transcript for user {session.UserId} to background worker. Length: {transcript.Length}");
+                    _worker.Push(session.UserId, transcript);
+                }
+                else
+                {
+                    _logger.LogInformation("[Session End] Transcript is empty, nothing to save.");
+                }
 
-            if (!string.IsNullOrWhiteSpace(transcript))
-            {
-                _logger.LogInformation($"[Session End] Sending transcript for user {userId} to background worker. Length: {transcript.Length}");
-                _worker.Push(formattedId, transcript);
+                _sessionManager.RemoveSession(Context.ConnectionId);
             }
-            else
-            {
-                _logger.LogInformation("[Session End] Transcript is empty, nothing to save.");
-            }
-
-            _conversationContextService.Clear();
         }
         catch (Exception ex)
         {
