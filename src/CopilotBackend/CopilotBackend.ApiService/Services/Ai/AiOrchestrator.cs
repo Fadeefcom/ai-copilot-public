@@ -290,16 +290,14 @@ public class AiOrchestrator
 
         if (forceMemory && !string.IsNullOrWhiteSpace(rawQuery))
         {
-            searchQuery = rawQuery;
-            yield return "System: Memory search forced.";
-        }
-        else if (!string.IsNullOrWhiteSpace(rawQuery))
-        {
             searchQuery = await DetectMemorySearchQueryAsync(rawQuery);
-            if (searchQuery != null)
+
+            if (searchQuery == null)
             {
-                yield return $"System: Auto-detected search intent. Query: \"{searchQuery}\"";
+                searchQuery = rawQuery;
             }
+
+            yield return $"System: Memory search active. Query: \"{searchQuery}\"";
         }
 
         if (!string.IsNullOrWhiteSpace(searchQuery))

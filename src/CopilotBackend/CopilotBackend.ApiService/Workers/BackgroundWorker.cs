@@ -30,6 +30,16 @@ public class BackgroundStackWorker : BackgroundService
     {
         _logger.LogInformation("BackgroundStackWorker started.");
 
+        try
+        {
+            await _vectorDbService.EnsureCollectionExistsAsync("copilot-memory", 3072, stoppingToken);
+            _logger.LogInformation("Azure Search Index initialization completed.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogCritical(ex, "Failed to initialize Azure Search Index during startup.");
+        }
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try

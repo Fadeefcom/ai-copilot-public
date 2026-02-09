@@ -1,9 +1,12 @@
 ﻿using Azure;
+using Azure.AI.OpenAI;
 using CopilotBackend.ApiService.Abstractions;
 using CopilotBackend.ApiService.Configuration;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.Extensions.Options;
 using OpenAI;
 using OpenAI.Embeddings;
+using System;
 using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
@@ -53,6 +56,8 @@ public class AzureLlmProvider : ILlmProvider
         var url = deployment.Endpoint;
         var payload = CreatePayload(currentMessages, deployment.Name, false, null);
 
+        var str = payload.ToString();
+
         return await SendRequestAsync(url, payload, ct);
     }
 
@@ -77,7 +82,7 @@ public class AzureLlmProvider : ILlmProvider
 
         var deployment = GetDeploymentName(model);
         var url = deployment.Endpoint;
-        var payload = CreatePayload(currentMessages, model, true, null);
+        var payload = CreatePayload(currentMessages, deployment.Name, true, null);
 
         await foreach (var chunk in ExecuteStreamRequestAsync(url, payload, ct).WithCancellation(ct))
         {
@@ -151,14 +156,19 @@ public class AzureLlmProvider : ILlmProvider
     private JsonObject CreatePayload(IEnumerable<ChatMessage> messages, string deployment, bool stream, string? base64Image)
     {
         var msgArray = new JsonArray();
-        var isReasoningModel = !deployment.Equals("gpt-4o-mini", StringComparison.OrdinalIgnoreCase);
+        var isReasoningModel = deployment.Contains("gpt-5.2-chat", StringComparison.OrdinalIgnoreCase) ||
+                           deployment.Contains("gpt-4o-mini", StringComparison.OrdinalIgnoreCase);
         var msgList = messages.ToList();
 
         for (int i = 0; i < msgList.Count; i++)
         {
             var m = msgList[i];
             string role = (m.Role == ChatRole.System && isReasoningModel) ? "developer" : m.Role.ToString().ToLowerInvariant();
-            var cleanContent = m.Content?.Replace("\r", "").Replace("\n", " ") ?? string.Empty;
+            string cleanContent = new string(m.Content?
+                .Where(c => !char.IsControl(c))
+                .ToArray());
+
+            cleanContent = System.Text.RegularExpressions.Regex.Replace(cleanContent, @"\s+", " ").Trim();
 
             if (role == "user" && !string.IsNullOrEmpty(base64Image) && i == msgList.Count - 1)
             {
@@ -246,7 +256,7 @@ public class AzureLlmProvider : ILlmProvider
         _ => _options.ChatDeployment
     };
 
-    public async Task<List<(string, float[])>> GetEmbeddingAsync(IEnumerable<string> chanks, CancellationToken ct = default)
+    public async Task<List<(string, float[])>> GetEmbeddingAsync(IEnumerable<string> chunks, CancellationToken ct = default)
     {
         var deployment = _options.EmbeddingDeployment;
 
@@ -255,20 +265,15 @@ public class AzureLlmProvider : ILlmProvider
         var model = deployment.Name;
         var deploymentName = deployment.Name;
 
-        var openAIOptions = new OpenAIClientOptions()
-        {
-            Endpoint = endpoint            
-        };
-
-        var client = new EmbeddingClient(deploymentName, credential, openAIOptions);
-
-        var response = await client.GenerateEmbeddingsAsync(chanks);
+        AzureOpenAIClient azureClient = new(endpoint, credential);
+        EmbeddingClient client = azureClient.GetEmbeddingClient(deploymentName);
+        var response = await client.GenerateEmbeddingsAsync(chunks);
 
         var result = new List<(string, float[])>(response.Value.Count);
 
         foreach (var embedding in response.Value)
         {
-            result.Add((chanks.ElementAt(embedding.Index), embedding.ToFloats().ToArray()));
+            result.Add((chunks.ElementAt(embedding.Index), embedding.ToFloats().ToArray()));
         }
 
         return result;
