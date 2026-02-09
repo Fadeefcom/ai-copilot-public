@@ -3,6 +3,7 @@ using CopilotBackend.ApiService.Services;
 using CopilotBackend.ApiService.Services.Ai;
 using CopilotBackend.ApiService.Workers;
 using Microsoft.AspNetCore.SignalR;
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 
 namespace CopilotBackend.ApiService.Services.Hubs;
@@ -15,6 +16,8 @@ public class SmartHub : Hub
     private readonly SessionManager _sessionManager;
     private readonly BackgroundStackWorker _worker;
 
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> _userLocks = new();
+
     public SmartHub(AiOrchestrator orchestrator, IAudioTranscriptionService audioService, BackgroundStackWorker worker, ILogger<SmartHub> logger, SessionManager sessionManager)
     {
         _orchestrator = orchestrator;
@@ -22,6 +25,10 @@ public class SmartHub : Hub
         _logger = logger;
         _sessionManager = sessionManager;
         _worker = worker;
+    }
+    private SemaphoreSlim GetConnectionLock()
+    {
+        return _userLocks.GetOrAdd(Context.ConnectionId, _ => new SemaphoreSlim(1, 1));
     }
 
     public async Task StartAudio(string language)
@@ -96,15 +103,26 @@ public class SmartHub : Hub
             yield break;
         }
 
-        var chunks = _orchestrator.StreamSmartActionAsync(
-            session,
-            AiOrchestrator.AiActionType.System,
-            model,
-            session.LatestScreenshot,
-            text,
-            session.IsMemoryForceEnabled);
+        var semaphore = GetConnectionLock();
+        await semaphore.WaitAsync(ct);
 
-        await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
+        try
+        {
+
+            var chunks = _orchestrator.StreamSmartActionAsync(
+                session,
+                AiOrchestrator.AiActionType.System,
+                model,
+                session.LatestScreenshot,
+                text,
+                session.IsMemoryForceEnabled);
+
+            await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
+        }
+        finally
+        {
+            semaphore.Release();
+        }
     }
 
     public async IAsyncEnumerable<string> SendWhatToSay(string model, [EnumeratorCancellation] CancellationToken ct)
@@ -116,14 +134,24 @@ public class SmartHub : Hub
             yield break;
         }
 
-        var chunks = _orchestrator.StreamSmartActionAsync(
-            session,
-            AiOrchestrator.AiActionType.WhatToSay,
-            model,
-            session.LatestScreenshot,
-            forceMemory: session.IsMemoryForceEnabled);
+        var semaphore = GetConnectionLock();
+        await semaphore.WaitAsync(ct);
 
-        await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
+        try
+        {
+            var chunks = _orchestrator.StreamSmartActionAsync(
+                session,
+                AiOrchestrator.AiActionType.WhatToSay,
+                model,
+                session.LatestScreenshot,
+                forceMemory: session.IsMemoryForceEnabled);
+
+            await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
+        }
+        finally
+        {
+            semaphore.Release();
+        }
     }
 
     public async IAsyncEnumerable<string> SendAssistRequest(string model, [EnumeratorCancellation] CancellationToken ct)
@@ -135,7 +163,12 @@ public class SmartHub : Hub
             yield break;
         }
 
-        var chunks = _orchestrator.StreamSmartActionAsync(
+        var semaphore = GetConnectionLock();
+        await semaphore.WaitAsync(ct);
+
+        try
+        {
+            var chunks = _orchestrator.StreamSmartActionAsync(
             session,
             AiOrchestrator.AiActionType.Assist,
             model,
@@ -143,7 +176,12 @@ public class SmartHub : Hub
             null,
             session.IsMemoryForceEnabled);
 
-        await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
+            await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
+        }
+        finally
+        {
+            semaphore.Release();
+        }
     }
 
     public async IAsyncEnumerable<string> SendFollowupRequest(string model, [EnumeratorCancellation] CancellationToken ct)
@@ -155,7 +193,12 @@ public class SmartHub : Hub
             yield break;
         }
 
-        var chunks = _orchestrator.StreamSmartActionAsync(
+        var semaphore = GetConnectionLock();
+        await semaphore.WaitAsync(ct);
+
+        try
+        {
+            var chunks = _orchestrator.StreamSmartActionAsync(
             session,
             AiOrchestrator.AiActionType.Followup,
             model,
@@ -163,7 +206,12 @@ public class SmartHub : Hub
             null,
             session.IsMemoryForceEnabled);
 
-        await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
+            await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
+        }
+        finally
+        {
+            semaphore.Release();
+        }
     }
 
     public async IAsyncEnumerable<string> StreamSmartMode(string modelName, [EnumeratorCancellation] CancellationToken ct)
@@ -180,6 +228,8 @@ public class SmartHub : Hub
         List<ConversationMessage> localBuffer = new();
         var threshold = DateTime.UtcNow.AddMinutes(-5);
         var lastCheckedText = string.Empty;
+
+        var semaphore = GetConnectionLock();
 
         while (!ct.IsCancellationRequested)
         {
@@ -224,15 +274,24 @@ public class SmartHub : Hub
                     {
                         _logger.LogInformation($"[System] Intent: {detectedIssue}");
 
-                        await foreach (var chunk in _orchestrator.StreamSmartActionAsync(
+                        await semaphore.WaitAsync(ct);
+                        try
+                        {
+
+                            await foreach (var chunk in _orchestrator.StreamSmartActionAsync(
                             session,
                             AiOrchestrator.AiActionType.System,
                             modelName,
                             session.LatestScreenshot,
                             detectedIssue,
                             session.IsMemoryForceEnabled).WithCancellation(ct))
+                            {
+                                yield return chunk;
+                            }
+                        }
+                        finally
                         {
-                            yield return chunk;
+                            semaphore.Release();
                         }
                     }
                 }
@@ -266,6 +325,10 @@ public class SmartHub : Hub
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error during OnDisconnectedAsync processing");
+        }
+        finally
+        {
+            _userLocks.TryRemove(Context.ConnectionId, out _);
         }
 
         await base.OnDisconnectedAsync(exception);

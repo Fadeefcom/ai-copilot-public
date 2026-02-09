@@ -2,6 +2,7 @@ import io
 import base64
 import threading
 import requests
+import logging
 import numpy as np
 import pyaudiowpatch as pyaudio
 from PIL import ImageGrab
@@ -27,11 +28,23 @@ class SignalRWorker(QThread):
 
     def run(self):
         hub_url = HUB_URL
+        handler = logging.FileHandler("client_debug.log", mode='w', encoding='utf-8')
+        handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
         self.connection = HubConnectionBuilder()\
-            .with_url(hub_url, options={"transport": "webSockets"})\
-            .with_automatic_reconnect({"type": "raw", "reconnect_interval": 5, "max_attempts": 5})\
+            .with_url(hub_url, options={
+                "skip_negotiation": False, # Для Azure оставляем False
+                "transport": "webSockets"
+            })\
+            .configure_logging(logging.DEBUG, socket_trace=True, handler=handler) \
+            .with_automatic_reconnect({
+                "type": "raw", 
+                "reconnect_interval": 5, 
+                "max_attempts": 5
+            })\
             .build()
-
+        
         self.connection.on_open(self._on_open)
         self.connection.on_close(self._handle_disconnect)
 
@@ -46,11 +59,12 @@ class SignalRWorker(QThread):
 
         while self.is_running:
             self.msleep(100)
-            if self.connection and self.connection.transport.state.value == 0:
-                self.is_running = False
         
         if self.connection:
-            self.connection.stop()
+            try:
+                self.connection.stop()
+            except:
+                pass
 
     def _on_open(self):
         self.status_received.emit("System: Socket Connected")
