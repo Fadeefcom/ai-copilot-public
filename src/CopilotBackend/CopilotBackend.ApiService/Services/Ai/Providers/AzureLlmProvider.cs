@@ -158,6 +158,7 @@ public class AzureLlmProvider : ILlmProvider
         {
             var m = msgList[i];
             string role = (m.Role == ChatRole.System && isReasoningModel) ? "developer" : m.Role.ToString().ToLowerInvariant();
+            var cleanContent = m.Content?.Replace("\r", "").Replace("\n", " ") ?? string.Empty;
 
             if (role == "user" && !string.IsNullOrEmpty(base64Image) && i == msgList.Count - 1)
             {
@@ -166,7 +167,7 @@ public class AzureLlmProvider : ILlmProvider
                     ["role"] = "user",
                     ["content"] = new JsonArray
                     {
-                        new JsonObject { ["type"] = "text", ["text"] = m.Content },
+                        new JsonObject { ["type"] = "text", ["text"] = cleanContent },
                         new JsonObject
                         {
                             ["type"] = "image_url",
@@ -177,7 +178,7 @@ public class AzureLlmProvider : ILlmProvider
             }
             else
             {
-                msgArray.Add(new JsonObject { ["role"] = role, ["content"] = m.Content });
+                msgArray.Add(new JsonObject { ["role"] = role, ["content"] = cleanContent });
             }
         }
 

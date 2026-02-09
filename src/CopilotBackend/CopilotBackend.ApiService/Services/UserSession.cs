@@ -88,7 +88,8 @@ public class UserSession
 
             foreach (var msg in _history)
             {
-                sb.AppendLine($"[{msg.Timestamp:O}] {msg.Role}: {msg.Text}");
+                var safeText = msg.Text?.Replace("\r", "").Replace("\n", " ") ?? string.Empty;
+                sb.Append($"[{msg.Timestamp:O}] {msg.Role}: {safeText} | ");
             }
 
             return sb.ToString();
