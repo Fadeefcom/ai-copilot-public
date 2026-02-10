@@ -1,21 +1,19 @@
 import sys
-from urllib import response
-import keyboard
 import io
 import base64
 import requests
+import keyboard
 from PIL import ImageGrab
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QPushButton, QComboBox, QCheckBox, QListWidget, 
-                             QListWidgetItem, QAbstractItemView, QLabel, QApplication,
-                             QFrame, QSizePolicy)
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QTime
-from PyQt6.QtGui import QFont, QColor
 
-from constants import BACKEND_URL, UI_TEXTS, MODELS, SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE
-from widgets import ChatMessage, ChatInput
-from threads import SignalRWorker, AudioCaptureThread, TypingIndicator
-from constants import COLORS
+from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+                             QPushButton, QComboBox, QCheckBox, QListView, QAbstractItemView, 
+                             QLabel, QApplication, QFrame)
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QTime
+from PyQt6.QtGui import QColor
+
+from constants import BACKEND_URL, UI_TEXTS, MODELS, SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, COLORS
+from widgets import ChatInput, ChatModel, ChatDelegate
+from threads import SignalRWorker, AudioCaptureThread
 
 class ChatWindow(QMainWindow):
     toggle_signal = pyqtSignal()
@@ -28,9 +26,8 @@ class ChatWindow(QMainWindow):
         self.started = False
         
         self.signalr_worker = None
-        self.typing_item = None
-        self.current_stream_msg_widget = None
         self.current_stream_text = ""
+        self.is_typing_active = False # Флаг вместо виджета
 
         self.setWindowTitle(self.texts['title'])
         self.resize(1000, 750)
@@ -66,6 +63,12 @@ class ChatWindow(QMainWindow):
         """)
 
         self._set_window_affinity()
+        
+        self.stream_buffer = ""
+        self.stream_timer = QTimer()
+        self.stream_timer.setInterval(30) # 33 FPS
+        self.stream_timer.timeout.connect(self._flush_stream_buffer)
+
         self._init_ui()
         
         self.toggle_signal.connect(self.toggle_visibility)
@@ -83,6 +86,7 @@ class ChatWindow(QMainWindow):
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(0)
 
+        # --- Header ---
         self.header = QFrame()
         self.header.setObjectName("Header")
         self.header.setFixedHeight(56)
@@ -142,6 +146,7 @@ class ChatWindow(QMainWindow):
 
         self.main_layout.addWidget(self.header)
 
+        # --- Content Area ---
         content_area = QHBoxLayout()
         content_area.setSpacing(0)
 
@@ -159,17 +164,33 @@ class ChatWindow(QMainWindow):
         self.latency_label.setStyleSheet(f"color: {COLORS['primary']}; font-size: 10px; margin-left: 5px;")
         chat_container.addWidget(self.latency_label)
 
-        self.chat_list = QListWidget()
-        self.chat_list.setStyleSheet("""
-            QListWidget {
+        self.chat_view = QListView()
+        self.chat_view.setStyleSheet("""
+            QListView {
                 background: transparent;
                 border: none;
                 outline: none;
             }
+            QListView::item {
+                border: none;
+                padding: 5px;
+            }
         """)
-        self.chat_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        self.chat_list.setSpacing(8)
+        self.chat_view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.chat_view.setUniformItemSizes(False)
+        self.chat_view.setResizeMode(QListView.ResizeMode.Adjust)
+
+        self.chat_view.setSpacing(15)
         
+        self.chat_model = ChatModel()
+        self.chat_delegate = ChatDelegate()
+
+        self.chat_view.setModel(self.chat_model)
+        self.chat_view.setItemDelegate(self.chat_delegate)
+
+        chat_container.addWidget(self.chat_view, 1)
+        
+        # --- Toolbar & Input ---
         self.action_toolbar = QHBoxLayout()
         self.action_toolbar.setSpacing(10)
         self.action_toolbar.setContentsMargins(0, 5, 0, 5) 
@@ -201,10 +222,10 @@ class ChatWindow(QMainWindow):
         self.input_box.send_signal.connect(self.send_message)
         self.input_box.setEnabled(False)
 
-        chat_container.addWidget(self.chat_list, 1)
         chat_container.addLayout(self.action_toolbar)
         chat_container.addWidget(self.input_box)
 
+        # --- Sidebar ---
         self.sidebar = QFrame()
         self.sidebar.setObjectName("Sidebar")
         self.sidebar.setFixedWidth(256)
@@ -237,7 +258,7 @@ class ChatWindow(QMainWindow):
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_timer)
         self.elapsed = QTime(0, 0, 0)
-        
+    
     def create_action_btn(self, p_type, color_hex, badge):
         text = self.texts[f'{p_type}_btn']
         if badge:
@@ -325,6 +346,9 @@ class ChatWindow(QMainWindow):
         self.signalr_worker.start()
 
     def on_socket_connected(self):
+        if hasattr(self, 'mic_thread') and self.mic_thread and self.mic_thread.isRunning():
+            return
+
         selected_lang = self.lang_dropdown.currentText()
         lang = 'ru' if selected_lang == 'ru' else 'en'
         self.signalr_worker.start_audio(lang)
@@ -357,15 +381,6 @@ class ChatWindow(QMainWindow):
     
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if not hasattr(self, 'chat_list'): return
-        
-        new_width = self.chat_list.viewport().width()
-        for i in range(self.chat_list.count()):
-            item = self.chat_list.item(i)
-            widget = self.chat_list.itemWidget(item)
-            if isinstance(widget, ChatMessage):
-                widget.update_width(new_width)
-                item.setSizeHint(widget.sizeHint())
 
     def _start_speaker_thread(self):
         if self.started:
@@ -402,18 +417,9 @@ class ChatWindow(QMainWindow):
         self.assist_button.setEnabled(is_started)
 
     def add_message(self, text, is_user=False):
-        current_width = self.chat_list.viewport().width()
-        widget = ChatMessage(text, is_user, max_width=current_width)
-        
-        item = QListWidgetItem()
-        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-        
-        self.chat_list.addItem(item)
-        self.chat_list.setItemWidget(item, widget)
-        
-        item.setSizeHint(widget.sizeHint())
-        self.chat_list.scrollToBottom()
-        return widget
+        is_system = text.startswith("System:")
+        self.chat_model.add_message(text, is_user, is_system)
+        self.chat_view.scrollToBottom()
 
     def update_timer(self):
         self.elapsed = self.elapsed.addSecs(1)
@@ -440,51 +446,46 @@ class ChatWindow(QMainWindow):
     def on_llm_chunk(self, chunk):
         self.stop_typing()
 
+        if chunk == "[DONE]":
+            self._flush_stream_buffer()
+            self.stream_timer.stop()
+            self.current_stream_text = ""
+            return
+            
         if chunk.startswith("System:"):
-            self.current_stream_msg_widget = None
+            self._flush_stream_buffer()
             self.add_message(chunk, False)
             return
-        
-        if chunk == "[DONE]":
-            self.current_stream_msg_widget = None
+            
+        if not self.stream_timer.isActive() and not self.stream_buffer:
+             self.add_message("", False)
+             self.current_stream_text = ""
+             self.stream_timer.start()
+
+        self.stream_buffer += chunk
+    
+    def _flush_stream_buffer(self):
+        if not self.stream_buffer:
             return
-            
-        if not self.current_stream_msg_widget:
-            self.current_stream_msg_widget = self.add_message("", False)
-            self.current_stream_text = ""
 
-        scrollbar = self.chat_list.verticalScrollBar()
-        was_at_bottom = scrollbar.value() >= (scrollbar.maximum() - 20)
-
-        self.current_stream_text += chunk
-        self.current_stream_msg_widget.set_markdown(self.current_stream_text)
+        text_to_add = self.stream_buffer
+        self.stream_buffer = ""
         
-        item = self.chat_list.item(self.chat_list.count() - 1)
-        if item:
-            item.setSizeHint(self.current_stream_msg_widget.sizeHint())
-            
-        if was_at_bottom:
-            self.chat_list.scrollToBottom()
+        self.current_stream_text += text_to_add
+        
+        self.chat_model.update_last_message(self.current_stream_text)
+        self.chat_view.scrollToBottom()
 
     def start_typing(self):
-        if self.typing_item: return
-        label = ChatMessage("...", is_user=False)
-        self.typing_item = QListWidgetItem()
-        self.typing_item.setSizeHint(label.sizeHint())
-        self.chat_list.addItem(self.typing_item)
-        self.chat_list.setItemWidget(self.typing_item, label)
-        self.typing_thread = TypingIndicator()
-        self.typing_thread.update_signal.connect(lambda d: label.set_markdown(d))
-        self.typing_thread.start()
-        self.chat_list.scrollToBottom()
+        if self.is_typing_active: return
+        self.chat_model.add_message("...", is_user=False, is_system=False) 
+        self.is_typing_active = True
+        self.chat_view.scrollToBottom()
 
     def stop_typing(self):
-        if hasattr(self, 'typing_item') and self.typing_item:
-            if hasattr(self, 'typing_thread'):
-                self.typing_thread.stop(); self.typing_thread.wait()
-            row = self.chat_list.row(self.typing_item)
-            if row >= 0: self.chat_list.takeItem(row)
-            self.typing_item = None
+        if self.is_typing_active:
+            self.chat_model.remove_last_message()
+            self.is_typing_active = False
 
     def _capture_screenshot(self):
         if self.screenshot_check.isChecked():
