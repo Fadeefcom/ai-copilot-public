@@ -16,3 +16,5 @@ src/CopilotBackend/CopilotBackend.ApiService/log.txt
 src/CopilotBackend/CopilotBackend.ApiService/appsettings.Production.json
 src/CopilotBackend/CopilotBackend.ApiService/logs
 client_debug.log
+.vs/ai-copilot-public/CopilotIndices
+.vs

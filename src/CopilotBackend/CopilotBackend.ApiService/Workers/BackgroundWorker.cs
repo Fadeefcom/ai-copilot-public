@@ -13,7 +13,8 @@ public class BackgroundStackWorker : BackgroundService
     private readonly ILlmProvider _lmProvider;
     private readonly IVectorDbService _vectorDbService;
 
-    public BackgroundStackWorker(ILogger<BackgroundStackWorker> logger, ILlmProvider llmProvider, IVectorDbService vectorDbService)
+    public BackgroundStackWorker(ILogger<BackgroundStackWorker> logger, ILlmProvider llmProvider, IVectorDbService vectorDbService, 
+        IConfiguration configuration)
     {
         _logger = logger;
         _lmProvider = llmProvider;
@@ -67,6 +68,6 @@ public class BackgroundStackWorker : BackgroundService
     {
         List<string> summary = await _lmProvider.SummarizeTextAsync(item.Text, ct);
         var embeddings = await _lmProvider.GetEmbeddingAsync(summary);
-        await _vectorDbService.SavePointsAsync("index", embeddings, item.UserId, ct);
+        await _vectorDbService.SavePointsAsync(string.Empty, embeddings, item.UserId, ct);
     }
 }

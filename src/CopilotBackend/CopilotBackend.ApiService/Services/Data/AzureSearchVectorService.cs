@@ -4,6 +4,7 @@ using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Indexes.Models;
 using Azure.Search.Documents.Models;
 using CopilotBackend.ApiService.Abstractions;
+using Microsoft.Extensions.Configuration;
 
 namespace CopilotBackend.ApiService.Services.Data;
 
@@ -13,6 +14,7 @@ public class AzureSearchVectorService : IVectorDbService
     private readonly SearchClient _searchClient;
     private readonly string _indexName;
     private readonly ILogger<AzureSearchVectorService> _logger;
+    private readonly string _defaultCategory;
 
     private const string VectorProfileName = "my-vector-profile";
     private const string HnswConfigName = "my-hnsw-config";
@@ -21,6 +23,8 @@ public class AzureSearchVectorService : IVectorDbService
     {
         var endpointUrl = config["VectorDb:Endpoint"] ?? throw new ArgumentNullException("VectorDb:Endpoint");
         var apiKey = config["VectorDb:ApiKey"] ?? throw new ArgumentNullException("VectorDb:ApiKey");
+        _defaultCategory = config["VectorDb:DefaultCategory"]
+            ?? throw new NotImplementedException("Category missing.");
 
         var endpoint = new Uri(endpointUrl);
         var credential = new AzureKeyCredential(apiKey);
@@ -81,6 +85,9 @@ public class AzureSearchVectorService : IVectorDbService
 
     public async Task SavePointsAsync(string category, IEnumerable<(string Text, float[] Vector)> items, Guid userId, CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(category))
+            category = _defaultCategory;
+
         var batch = new IndexDocumentsBatch<SearchDocument>();
 
         foreach (var (text, vector) in items)
@@ -106,10 +113,13 @@ public class AzureSearchVectorService : IVectorDbService
 
     public async Task<List<string>> SearchAsync(string category, string textQuery, float[] vector, Guid userId, int limit = 5, CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(category))
+            category = _defaultCategory;
+
         var searchOptions = new SearchOptions
         {
             Size = limit,
-            Filter = $"user_id eq '{userId}'",
+            Filter = $"user_id eq '{userId}' and category eq '{category}'",
             VectorSearch = new VectorSearchOptions
             {
                 Queries = {

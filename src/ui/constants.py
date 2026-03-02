@@ -5,8 +5,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:57875/api")
-HUB_URL = os.getenv("HUB_URL", "http://localhost:57875/hubs/smart")
+# https://copilot-spain.thankfulwave-2c8bf2eb.spaincentral.azurecontainerapps.io
+# https://copilot.delightfulcoast-d73dd83d.eastus2.azurecontainerapps.io/api
+
+BACKEND_URL = os.getenv("BACKEND_URL", "https://copilot-spain.thankfulwave-2c8bf2eb.spaincentral.azurecontainerapps.io/api")
+HUB_URL = os.getenv("HUB_URL", "https://copilot-spain.thankfulwave-2c8bf2eb.spaincentral.azurecontainerapps.io/hubs/smart")
 
 WDA_EXCLUDEFROMCAPTURE = 0x00000011
 SetWindowDisplayAffinity = None

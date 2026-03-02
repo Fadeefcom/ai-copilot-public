@@ -36,7 +36,7 @@ public class AiOrchestrator
 
             var vector = embeddings[0].Item2;
 
-            var results = await _vectorDbService.SearchAsync("index", query, vector, userId, limit: 3);
+            var results = await _vectorDbService.SearchAsync(string.Empty, query, vector, userId, limit: 3);
 
             if (results.Count == 0) return null;
 
