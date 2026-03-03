@@ -10,4 +10,7 @@ public interface IOpenAiApi
 
     [Post("/chat/completions")]
     Task<HttpResponseMessage> ChatStreamAsync([Body] JsonObject request, [Header("Authorization")] string authorization);
+
+    [Post("/embeddings")]
+    Task<JsonObject> GetEmbeddingsAsync([Body] JsonObject request, [Header("Authorization")] string authorization);
 }
