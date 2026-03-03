@@ -72,6 +72,7 @@ class ChatWindow(QMainWindow):
         keyboard.add_hotkey('ctrl+/', lambda: self.toggle_signal.emit())
         keyboard.add_hotkey('f1', lambda: self.action_signal.emit('say'))
         keyboard.add_hotkey('f2', lambda: self.action_signal.emit('followup'))
+        keyboard.add_hotkey('f3', lambda: self.action_signal.emit('assist'))
 
     def _init_ui(self):
         central_widget = QWidget()
@@ -157,7 +158,7 @@ class ChatWindow(QMainWindow):
         
         self.say_button = self.create_action_btn('say', COLORS['primary'], "F1")
         self.followup_button = self.create_action_btn('followup', COLORS['accent'], "F2")
-        self.assist_button = self.create_action_btn('assist', COLORS['warning'], "")
+        self.assist_button = self.create_action_btn('assist', COLORS['warning'], "F3")
 
         self.action_toolbar.addWidget(self.say_button)
         self.action_toolbar.addWidget(self.followup_button)
@@ -285,7 +286,7 @@ class ChatWindow(QMainWindow):
         self.stop_button.setText(self.texts['stop'])
         self.say_button.setText(f"{self.texts['say_btn']} F1")
         self.followup_button.setText(f"{self.texts['followup_btn']} F2")
-        self.assist_button.setText(self.texts['assist_btn'])
+        self.assist_button.setText(f"{self.texts['assist_btn']} F3")
 
     def on_start(self):
         if self.started: return

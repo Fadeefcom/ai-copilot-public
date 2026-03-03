@@ -60,7 +60,6 @@ public class Program
         builder.Services.AddSingleton<ConversationContextService>();
         builder.Services.AddSingleton<DeepgramAudioService>();
         builder.Services.AddTransient<ContextManager>();
-        builder.Services.AddTransient<IContextCompressor, LocalLlmCompressor>();
 
         // AI Stack
         builder.Services.AddTransient<PromptManager>();
