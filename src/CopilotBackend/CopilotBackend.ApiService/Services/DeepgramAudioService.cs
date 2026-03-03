@@ -33,7 +33,7 @@ public class DeepgramAudioService : IDisposable
         _contextService = contextService;
     }
 
-    public async Task StartAsync(string language)
+    public async Task StartAsync(string language, string connectionId)
     {
         if (IsRunning) return;
         _cts = new CancellationTokenSource();
@@ -44,14 +44,14 @@ public class DeepgramAudioService : IDisposable
             foreach (var role in roles)
             {
                 var streamer = new AudioStreamer(_apiKey, _logger, _contextService, role, OnMessageReceived);
-                await streamer.ConnectAsync(language);
+                await streamer.ConnectAsync(language, connectionId);
                 _streamers[role] = streamer;
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to start audio proxy service");
-            await StopAsync();
+            await StopAsync(connectionId);
             throw;
         }
     }
@@ -66,7 +66,7 @@ public class DeepgramAudioService : IDisposable
         return Task.CompletedTask;
     }
 
-    public async Task StopAsync()
+    public async Task StopAsync(string connectionId)
     {
         _cts?.Cancel();
 
@@ -132,11 +132,8 @@ public class DeepgramAudioService : IDisposable
         return null;
     }
 
-    public void Clear() => _contextService.Clear();
-
     public void Dispose()
     {
-        StopAsync().GetAwaiter().GetResult();
         _cts?.Dispose();
     }
 
@@ -157,7 +154,7 @@ public class DeepgramAudioService : IDisposable
             _onMessage = onMessage;
         }
 
-        public async Task ConnectAsync(string language)
+        public async Task ConnectAsync(string language, string connectionId)
         {
             await _client.Subscribe((_, e) =>
             {
@@ -165,14 +162,14 @@ public class DeepgramAudioService : IDisposable
                 if (!string.IsNullOrWhiteSpace(transcript))
                 {
                     _logger.LogInformation($"[Speech-to-Text] {_role}: {transcript}");
-                    _ctx.AddMessage(_role, transcript);
+                    _ctx.AddMessage(connectionId, _role, transcript);
                     _onMessage(_role, transcript);
                 }
             });
 
             var schema = new LiveSchema
             {
-                Model = "nova-2",
+                Model = "nova-3",
                 Language = language,
                 Encoding = "linear16",
                 SampleRate = 16000,

@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Collections.Concurrent;
+using System.Text;
 
 namespace CopilotBackend.ApiService.Services;
 
@@ -14,7 +15,8 @@ public enum SpeakerRole
 {
     Me,
     Companion,
-    System
+    System, 
+    AI
 }
 
 public class ConversationMessage
@@ -24,100 +26,80 @@ public class ConversationMessage
     public string Text { get; set; } = "";
 }
 
-public class ArchivedContext
+public class UserSessionState
 {
-    public DateTime ArchiveTime { get; set; }
-    public string SummaryText { get; set; } = "";
+    public List<ConversationMessage> History { get; } = new();
+    public object LockObj { get; } = new();
 }
 
 public class ConversationContextService
 {
-    private readonly List<ConversationMessage> _history = new();
-    private readonly List<ArchivedContext> _archives = new();
-    private readonly object _lock = new();
+    private readonly ConcurrentDictionary<string, UserSessionState> _sessions = new();
+    private readonly TimeSpan _mergeThreshold = TimeSpan.FromMilliseconds(200);
+    private readonly ILogger<ConversationContextService> _logger;
 
-    private readonly TimeSpan _mergeThreshold = TimeSpan.FromSeconds(5);
+    public ConversationContextService(ILogger<ConversationContextService> logger)
+    {
+        _logger = logger;
+    }
 
-    public void AddMessage(SpeakerRole role, string text)
+    public void AddMessage(string connectionId, SpeakerRole role, string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
 
-        lock (_lock)
+        var session = GetOrCreateSession(connectionId);
+        lock (session.LockObj)
         {
-            var lastMessage = _history.LastOrDefault();
-
-            if (lastMessage != null &&
-                lastMessage.Role == role &&
-                DateTime.UtcNow - lastMessage.Timestamp < _mergeThreshold)
+            var lastMessage = session.History.LastOrDefault();
+            if (lastMessage != null && lastMessage.Role == role && DateTime.UtcNow - lastMessage.Timestamp < _mergeThreshold)
             {
                 lastMessage.Text += $" {text}";
                 lastMessage.Timestamp = DateTime.UtcNow;
             }
             else
             {
-                _history.Add(new ConversationMessage
-                {
-                    Timestamp = DateTime.UtcNow,
-                    Role = role,
-                    Text = text
-                });
+                session.History.Add(new ConversationMessage { Timestamp = DateTime.UtcNow, Role = role, Text = text });
+                _logger.LogInformation("[{ConnectionId}] {Role}: {Text}", connectionId, role, text);
             }
         }
     }
 
-    public void Clear()
+    private UserSessionState GetOrCreateSession(string connectionId) =>
+        _sessions.GetOrAdd(connectionId, _ => new UserSessionState());
+
+    public void AddAiResponse(string connectionId, string text)
     {
-        lock (_lock)
+        if (string.IsNullOrWhiteSpace(text)) return;
+
+        var session = GetOrCreateSession(connectionId);
+        lock (session.LockObj)
         {
-            _history.Clear();
-            _archives.Clear();
+            session.History.Add(new ConversationMessage { Timestamp = DateTime.UtcNow, Role = SpeakerRole.AI, Text = text });
+            _logger.LogInformation("[{ConnectionId}] AI_RESPONSE: {Text}", connectionId, text);
         }
     }
 
-    public string GetFormattedLog()
+    public List<ConversationMessage> GetFullHistoryAndClear(string connectionId)
     {
-        lock (_lock)
+        if (_sessions.TryRemove(connectionId, out var session))
+        {
+            lock (session.LockObj) return session.History.ToList();
+        }
+        return new List<ConversationMessage>();
+    }
+
+    public string GetFormattedLog(string connectionId, SpeakerRole[] requiredRoles)
+    {
+        if (!_sessions.TryGetValue(connectionId, out var session)) return "";
+
+        lock (session.LockObj)
         {
             var sb = new StringBuilder();
-
-            foreach (var archive in _archives)
+            foreach (var msg in session.History.Where(r => requiredRoles.Contains(r.Role)))
             {
-                sb.AppendLine($"[ARCHIVE {archive.ArchiveTime:HH:mm:ss}]: {archive.SummaryText}");
-            }
-
-            foreach (var msg in _history)
-            {
-                sb.AppendLine($"[{msg.Role} {msg.Timestamp:HH:mm:ss}]: {msg.Text}");
+                sb.AppendLine($"[{msg.Timestamp:HH:mm:ss}]: {msg.Text}");
             }
             return sb.ToString();
-        }
-    }
-
-    public IEnumerable<ConversationMessage> GetMessages()
-    {
-        lock (_lock) return _history.ToList();
-    }
-
-    public void ArchiveContext(string summary)
-    {
-        lock (_lock)
-        {
-            _archives.Add(new ArchivedContext
-            {
-                ArchiveTime = DateTime.UtcNow,
-                SummaryText = summary
-            });
-        }
-    }
-
-    public void CompactHistory(int messagesToKeep = 5)
-    {
-        lock (_lock)
-        {
-            if (_history.Count > messagesToKeep)
-            {
-                _history.RemoveRange(0, _history.Count - messagesToKeep);
-            }
         }
     }
 }

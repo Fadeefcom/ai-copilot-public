@@ -1,4 +1,4 @@
-using CopilotBackend.ApiService.Abstractions;
+﻿using CopilotBackend.ApiService.Abstractions;
 using CopilotBackend.ApiService.Configuration;
 using CopilotBackend.ApiService.Routes;
 using CopilotBackend.ApiService.Services;
@@ -47,6 +47,12 @@ public class Program
         builder.Services.Configure<AiOptions>(builder.Configuration.GetSection(AiOptions.SectionName));
         builder.Services.Configure<LlmOptions>(builder.Configuration.GetSection(LlmOptions.SectionName));
 
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Information()
+            .WriteTo.Console()
+            .WriteTo.File("logs/copilot-.txt", rollingInterval: RollingInterval.Day)
+            .CreateLogger();
+
         // Core Services
         builder.Services.AddSerilog();
         builder.Services.AddOpenApi();
@@ -59,7 +65,7 @@ public class Program
         // Domain Services
         builder.Services.AddSingleton<ConversationContextService>();
         builder.Services.AddSingleton<DeepgramAudioService>();
-        builder.Services.AddTransient<ContextManager>();
+        builder.Services.AddSingleton<SummarizationFaissWorker>();
 
         // AI Stack
         builder.Services.AddTransient<PromptManager>();

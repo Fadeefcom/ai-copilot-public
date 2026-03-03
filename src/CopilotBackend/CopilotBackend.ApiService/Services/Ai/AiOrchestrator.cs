@@ -1,5 +1,4 @@
 ﻿using CopilotBackend.ApiService.Abstractions;
-using static System.Net.Mime.MediaTypeNames;
 
 namespace CopilotBackend.ApiService.Services.Ai;
 
@@ -7,183 +6,61 @@ public class AiOrchestrator
 {
     private readonly IEnumerable<ILlmProvider> _providers;
     private readonly PromptManager _promptManager;
-    private readonly ContextManager _contextManager;
     private readonly DeepgramAudioService _audioService;
+    private readonly ConversationContextService _contextService;
 
     public AiOrchestrator(
         IEnumerable<ILlmProvider> providers,
         PromptManager promptManager,
-        ContextManager contextManager,
-        DeepgramAudioService audioService)
+        DeepgramAudioService audioService,
+        ConversationContextService contextService)
     {
         _providers = providers;
         _promptManager = promptManager;
-        _contextManager = contextManager;
         _audioService = audioService;
+        _contextService = contextService;
     }
 
-    public async Task<string> ProcessRequestAsync(string modelName, string instruction, string? Image)
+    public async Task<string> ProcessRequestAsync(string connectionId, string modelName, string instruction, string? Image)
     {
         if (!_audioService.IsRunning)
             return "Audio capture is not running.";
 
-        await _contextManager.CheckAndArchiveContextAsync();
-
         var name = modelName.Split(' ')[0];
         var version = modelName.Split(' ')[1];
 
         var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
         if (provider == null) throw new ArgumentException($"Model '{modelName}' not found.");
 
-        var messages = await _promptManager.BuildRequestMessagesAsync(instruction, Image != null);
+        var messages = await _promptManager.BuildRequestMessagesAsync(connectionId, instruction, Image != null);
         return await provider.GenerateResponseAsync(messages, version, Image);
     }
 
-    public async Task<string> ProcessAssistRequestAsync(string modelName, string? Image)
+    public async Task<string> ProcessAssistRequestAsync(string connectionId, string modelName, string? Image)
     {
-        await _contextManager.CheckAndArchiveContextAsync();
-
         var name = modelName.Split(' ')[0];
         var version = modelName.Split(' ')[1];
 
         var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
         if (provider == null) throw new ArgumentException($"Model '{modelName}' not found.");
 
-        var messages = await _promptManager.BuildAssistMessagesAsync(Image != null);
+        var messages = await _promptManager.BuildAssistMessagesAsync(connectionId, Image != null);
         return await provider.GenerateResponseAsync(messages, version, Image);
     }
 
-    public async Task<string> ProcessFollowupRequestAsync(string modelName, string? Image)
+    public async Task<string> ProcessFollowupRequestAsync(string connectionId, string modelName, string? Image)
     {
-        await _contextManager.CheckAndArchiveContextAsync();
-
         var name = modelName.Split(' ')[0];
         var version = modelName.Split(' ')[1];
 
         var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
         if (provider == null) throw new ArgumentException($"Model '{modelName}' not found.");
 
-        var messages = await _promptManager.BuildFollowupMessagesAsync(Image != null);
+        var messages = await _promptManager.BuildFollowupMessagesAsync(connectionId, Image != null);
         return await provider.GenerateResponseAsync(messages, version, Image);
     }
 
-    public async IAsyncEnumerable<string> StreamRequestAsync(string modelName, string prompt)
-    {
-        if (!_audioService.IsRunning)
-        {
-            yield return "System: Audio capture is not running.";
-            yield break;
-        }
-
-        var name = modelName.Split(' ')[0];
-        var version = modelName.Split(' ')[1];
-
-        var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
-        if (provider == null)
-        {
-            yield return $"System: LLM Provider '{modelName}' not found.";
-            yield break;
-        }
-
-        IAsyncEnumerable<string>? stream = null;
-        string? errorMessage = null;
-
-        try
-        {
-            var systemPrompt = await _promptManager.GetSystemPrompt();
-            var messages = new List<ChatMessage>
-            {
-                new(ChatRole.System, systemPrompt),
-                new(ChatRole.User, prompt)
-            };
-            stream = provider.StreamResponseAsync(messages, version);
-        }
-        catch (Exception ex)
-        {
-            errorMessage = $"System: Failed to initialize stream. {ex.Message}";
-        }
-
-        if (errorMessage != null)
-        {
-            yield return errorMessage;
-            yield break;
-        }
-
-        await foreach (var chunk in stream!)
-        {
-            yield return chunk;
-        }
-    }
-
-    private async IAsyncEnumerable<string> StreamResponseWithVisionAsync(string modelName, string prompt, string? base64Image)
-    {
-        var name = modelName.Split(' ')[0];
-        var version = modelName.Split(' ')[1];
-        var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
-
-        if (provider == null)
-        {
-            yield return $"System: Provider '{name}' not found.";
-            yield break;
-        }
-
-        IAsyncEnumerable<string>? stream = null;
-        string? errorMessage = null;
-
-        try
-        {
-            var systemPrompt = await _promptManager.GetSystemPrompt();
-            var messages = new List<ChatMessage>
-            {
-                new(ChatRole.System, systemPrompt),
-                new(ChatRole.User, prompt)
-            };
-            stream = provider.StreamResponseAsync(messages, version, base64Image);
-        }
-        catch (Exception ex)
-        {
-            errorMessage = $"System: Error starting vision stream. {ex.Message}";
-        }
-
-        if (errorMessage != null)
-        {
-            yield return errorMessage;
-            yield break;
-        }
-
-        await foreach (var chunk in stream!)
-        {
-            yield return chunk;
-        }
-    }
-
-    private async IAsyncEnumerable<string> StreamActionWithPrompt(string modelName, string? base64Image, Task<string> promptTask)
-    {
-        string? prompt = null;
-        string? errorMessage = null;
-
-        try
-        {
-            prompt = await promptTask;
-        }
-        catch (Exception ex)
-        {
-            errorMessage = $"System: Failed to load prompt. {ex.Message}";
-        }
-
-        if (errorMessage != null)
-        {
-            yield return errorMessage;
-            yield break;
-        }
-
-        await foreach (var chunk in StreamResponseWithVisionAsync(modelName, prompt!, base64Image))
-        {
-            yield return chunk;
-        }
-    }
-
-    public async Task<string?> DetectQuestionAsync(string modelName, string transcript)
+    public async Task<string?> DetectQuestionAsync(string connectionId, string modelName, string transcript)
     {
         if (string.IsNullOrWhiteSpace(transcript)) return null;
 
@@ -191,12 +68,7 @@ public class AiOrchestrator
         var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
         if (provider == null) return null;
 
-        var historyMessages = _contextManager.GetMessages()
-            .Where(m => m.Timestamp > DateTime.UtcNow.AddMinutes(-15))
-            .TakeLast(6)
-            .ToList();
-
-        var historyText = string.Join("\n", historyMessages.Select(m => $"[{m.Role}]: {m.Text}"));
+        var historyText = _contextService.GetFormattedLog(connectionId, [SpeakerRole.Companion]);
 
         var systemPrompt =
             "You are a conversation analyzer. Your goal is to identify if the User needs help right now.\n" +
@@ -232,14 +104,76 @@ public class AiOrchestrator
         }
     }
 
-    public IAsyncEnumerable<string> StreamSmartActionAsync(AiActionType actionType, string modelName, string? base64Image, string? userText = null)
+    public async IAsyncEnumerable<string> StreamSmartActionAsync(AiActionType actionType, string modelName, string connectionId, string? base64Image, string? userText = null)
     {
-        return actionType switch
+        var name = modelName.Split(' ')[0];
+        var version = modelName.Split(' ')[1];
+        var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
+
+        if (provider == null)
         {
-            AiActionType.Assist => StreamActionWithPrompt(modelName, base64Image, _promptManager.GetAssistPromt()),
-            AiActionType.Followup => StreamActionWithPrompt(modelName, base64Image, _promptManager.GetFollowupPromt()),
-            _ => StreamResponseWithVisionAsync(modelName, userText ?? "", base64Image)
-        };
+            yield return $"System: Provider '{name}' not found.";
+            yield break;
+        }
+
+        List<ChatMessage>? messages = null;
+        string? errorMessage = null;
+
+        try
+        {
+            bool hasImage = base64Image != null;
+            messages = actionType switch
+            {
+                AiActionType.Assist => await _promptManager.BuildAssistMessagesAsync(connectionId, hasImage),
+                AiActionType.Followup => await _promptManager.BuildFollowupMessagesAsync(connectionId, hasImage),
+                _ => await _promptManager.BuildRequestMessagesAsync(connectionId, userText ?? "", hasImage)
+            };
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"System: Failed to load prompt. {ex.Message}";
+        }
+
+        if (errorMessage != null)
+        {
+            yield return errorMessage;
+            yield break;
+        }
+
+        IAsyncEnumerable<string>? stream = null;
+        try
+        {
+            stream = provider.StreamResponseAsync(messages!, version, base64Image);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"System: Error starting stream. {ex.Message}";
+        }
+
+        if (errorMessage != null)
+        {
+            yield return errorMessage;
+            yield break;
+        }
+
+        await foreach (var chunk in stream!)
+        {
+            yield return chunk;
+        }
+    }
+
+    public async Task<string> SummarizeTopicsAsync(string fullTranscript, string modelName)
+    {
+        var name = modelName.Split(' ')[0];
+        var version = modelName.Split(' ')[1];
+        var provider = _providers.FirstOrDefault(p => p.ProviderName == name);
+
+        if (provider == null) return string.Empty;
+
+        return await provider.GenerateResponseAsync(new[] {
+            new ChatMessage(ChatRole.System, "Summarize the conversation by topics. Separate blocks with '---'"),
+            new ChatMessage(ChatRole.User, fullTranscript)
+        }, version);
     }
 
     public enum AiActionType

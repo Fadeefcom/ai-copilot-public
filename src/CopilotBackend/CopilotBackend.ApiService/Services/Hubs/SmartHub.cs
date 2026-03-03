@@ -10,22 +10,27 @@ public class SmartHub : Hub
 {
     private readonly AiOrchestrator _orchestrator;
     private readonly DeepgramAudioService _audioService;
+    private readonly ConversationContextService _contextService;
+    private readonly SummarizationFaissWorker _faissWorker;
     private readonly ILogger<SmartHub> _logger;
 
     private static readonly ConcurrentDictionary<string, string> _latestScreenshots = new();
 
-    public SmartHub(AiOrchestrator orchestrator, DeepgramAudioService audioService, ILogger<SmartHub> logger)
+    public SmartHub(AiOrchestrator orchestrator, DeepgramAudioService audioService, ILogger<SmartHub> logger, ConversationContextService conversationContext, SummarizationFaissWorker faissWorker)
     {
         _orchestrator = orchestrator;
         _audioService = audioService;
         _logger = logger;
+        _contextService = conversationContext;
+        _faissWorker = faissWorker;
     }
 
     public async Task StartAudio(string language)
     {
         try
         {
-            await _audioService.StartAsync(language);
+            var connectionId = Context.ConnectionId;
+            await _audioService.StartAsync(language, connectionId);
         }
         catch (Exception ex)
         {
@@ -34,7 +39,17 @@ public class SmartHub : Hub
         }
     }
 
-    public async Task StopAudio() => await _audioService.StopAsync();
+    public async Task StopAudio()
+    {
+        var connectionId = Context.ConnectionId;
+        await _audioService.StopAsync(connectionId);
+
+        var historyToProcess = _contextService.GetFullHistoryAndClear(connectionId);
+        if (historyToProcess.Any())
+        {
+            _ = Task.Run(() => _faissWorker.ProcessSessionAsync(connectionId, historyToProcess));
+        }
+    }
 
     public void SendAudioChunk(string base64Chunk, string role)
     {
@@ -49,24 +64,52 @@ public class SmartHub : Hub
 
     public async IAsyncEnumerable<string> SendMessage(string text, string model, string? image, [EnumeratorCancellation] CancellationToken ct)
     {
-        var chunks = _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.System, model, image, text);
-        await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
+        var connectionId = Context.ConnectionId;
+        var chunks = _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.System, model, connectionId, image, text);
+        var aiResponseBuffer = new StringBuilder();
+
+        await foreach (var chunk in chunks.WithCancellation(ct))
+        {
+            aiResponseBuffer.Append(chunk);
+            yield return chunk;
+        }
+
+        _contextService.AddAiResponse(Context.ConnectionId, aiResponseBuffer.ToString());
     }
 
     public async IAsyncEnumerable<string> SendAssistRequest(string model, string? image, [EnumeratorCancellation] CancellationToken ct)
     {
-        var chunks = _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.Assist, model, image);
-        await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
+        var connectionId = Context.ConnectionId;
+        var chunks = _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.Assist, model, connectionId, image);
+        var aiResponseBuffer = new StringBuilder();
+
+        await foreach (var chunk in chunks.WithCancellation(ct))
+        {
+            aiResponseBuffer.Append(chunk);
+            yield return chunk;
+        }
+
+        _contextService.AddAiResponse(Context.ConnectionId, aiResponseBuffer.ToString());
     }
 
     public async IAsyncEnumerable<string> SendFollowupRequest(string model, string? image, [EnumeratorCancellation] CancellationToken ct)
     {
-        var chunks = _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.Followup, model, image);
-        await foreach (var chunk in chunks.WithCancellation(ct)) yield return chunk;
+        var connectionId = Context.ConnectionId;
+        var chunks = _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.Followup, model, connectionId, image);
+        var aiResponseBuffer = new StringBuilder();
+
+        await foreach (var chunk in chunks.WithCancellation(ct))
+        {
+            aiResponseBuffer.Append(chunk);
+            yield return chunk;
+        }
+
+        _contextService.AddAiResponse(Context.ConnectionId, aiResponseBuffer.ToString());
     }
 
     public async IAsyncEnumerable<string> StreamSmartMode(string modelName, [EnumeratorCancellation] CancellationToken ct)
     {
+        var connectionId = Context.ConnectionId;
         _logger.LogInformation($"[SmartHub] Smart Mode started: {Context.ConnectionId}");
         var buffer = new StringBuilder();
 
@@ -77,13 +120,20 @@ public class SmartHub : Hub
 
             if (buffer.Length > 20)
             {
-                var detectedIssue = await _orchestrator.DetectQuestionAsync(modelName, buffer.ToString());
+                var detectedIssue = await _orchestrator.DetectQuestionAsync(connectionId, modelName, buffer.ToString());
                 if (detectedIssue != null)
                 {
+                    var aiResponseBuffer = new StringBuilder();
                     yield return $"[System] Intent: {detectedIssue}";
                     _latestScreenshots.TryGetValue(Context.ConnectionId, out var img);
-                    await foreach (var chunk in _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.System, modelName, img, detectedIssue).WithCancellation(ct))
+                    await foreach (var chunk in _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.System, modelName, connectionId, img, detectedIssue).WithCancellation(ct))
+                    {
                         yield return chunk;
+                        aiResponseBuffer.Append(chunk);
+                    }
+
+                    _contextService.AddAiResponse(Context.ConnectionId, aiResponseBuffer.ToString());
+                    aiResponseBuffer.Clear();
                     buffer.Clear();
                 }
             }

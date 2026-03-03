@@ -18,11 +18,12 @@ public class PromptManager
         _promptsFolder = Path.Combine(env.ContentRootPath, "promts");
     }
 
-    public async Task<List<ChatMessage>> BuildAssistMessagesAsync(bool ifImage = false)
+    public async Task<List<ChatMessage>> BuildAssistMessagesAsync(string connectionId, bool ifImage = false)
     {
         var systemPrompt = await LoadPromptAsync(_assistPromptFile);
         var userPersona = await LoadPromptAsync(_userContextFile);
-        var dialogueHistory = _contextService.GetFormattedLog();
+        var dialogueHistory = _contextService.GetFormattedLog(connectionId, [SpeakerRole.Me, SpeakerRole.Companion]);
+        var aiResponces = _contextService.GetFormattedLog(connectionId, [ SpeakerRole.AI ]);
 
         var fullSystemMessage = new StringBuilder()
             .AppendLine("--- SYSTEM INSTRUCTIONS ---")
@@ -51,14 +52,16 @@ public class PromptManager
         return new List<ChatMessage>
         {
             new(ChatRole.System, systemMessage),
-            new(ChatRole.User, contextMessage)
+            new(ChatRole.User, contextMessage),
+            new(ChatRole.Assistant, aiResponces)
         };
     }
 
-    public async Task<List<ChatMessage>> BuildFollowupMessagesAsync(bool ifImage = false)
+    public async Task<List<ChatMessage>> BuildFollowupMessagesAsync(string connectionId, bool ifImage = false)
     {
         var systemPrompt = await LoadPromptAsync(_followupPromptFile);
-        var dialogueHistory = _contextService.GetFormattedLog();
+        var dialogueHistory = _contextService.GetFormattedLog(connectionId, [SpeakerRole.Me, SpeakerRole.Companion]);
+        var aiResponces = _contextService.GetFormattedLog(connectionId, [SpeakerRole.AI]);
 
         var fullSystemMessage = new StringBuilder()
             .AppendLine("--- SYSTEM INSTRUCTIONS ---")
@@ -84,15 +87,17 @@ public class PromptManager
         return new List<ChatMessage>
         {
             new(ChatRole.System, systemMessage),
-            new(ChatRole.User, contextMessage)
+            new(ChatRole.User, contextMessage),
+             new(ChatRole.Assistant, aiResponces)
         };
     }
 
-    public async Task<List<ChatMessage>> BuildRequestMessagesAsync(string userInstruction, bool ifImage = false)
+    public async Task<List<ChatMessage>> BuildRequestMessagesAsync(string connectionId, string userInstruction, bool ifImage = false)
     {
         var systemPrompt = await LoadPromptAsync(_systemPromptFile);
         var userPersona = await LoadPromptAsync(_userContextFile);
-        var dialogueHistory = _contextService.GetFormattedLog();
+        var dialogueHistory = _contextService.GetFormattedLog(connectionId, [SpeakerRole.Me, SpeakerRole.Companion]);
+        var aiResponces = _contextService.GetFormattedLog(connectionId, [SpeakerRole.AI]);
 
         var fullSystemMessage = new StringBuilder()
             .AppendLine("--- SYSTEM INSTRUCTIONS ---")
@@ -123,7 +128,8 @@ public class PromptManager
         return new List<ChatMessage>
         {
             new(ChatRole.System, systemMessage),
-            new(ChatRole.User, fullUserMessage)
+            new(ChatRole.User, fullUserMessage),
+             new(ChatRole.Assistant, aiResponces)
         };
     }
 

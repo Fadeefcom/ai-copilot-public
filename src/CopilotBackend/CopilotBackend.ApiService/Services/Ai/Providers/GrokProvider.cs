@@ -83,6 +83,9 @@ public class GrokProvider : ILlmProvider
             yield break;
         }
 
+        if(responseMessage == null)
+            yield break;
+
         using var stream = await responseMessage.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);
 
