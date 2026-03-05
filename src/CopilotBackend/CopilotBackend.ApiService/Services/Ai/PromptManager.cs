@@ -24,37 +24,28 @@ public class PromptManager
         var systemPrompt = await LoadPromptAsync(_assistPromptFile);
         var userPersona = await LoadPromptAsync(_userContextFile);
         var dialogueHistory = _contextService.GetFormattedLog(connectionId, [SpeakerRole.Me, SpeakerRole.Companion]);
-        var aiResponces = _contextService.GetFormattedLog(connectionId, [ SpeakerRole.AI ]);
+        var aiResponses = _contextService.GetFormattedLog(connectionId, [SpeakerRole.AI]);
 
-        var fullSystemMessage = new StringBuilder()
-            .AppendLine("--- SYSTEM INSTRUCTIONS ---")
-            .AppendLine(systemPrompt);
+        var systemBuilder = new StringBuilder().AppendLine(systemPrompt);
+        if (ifImage) AppendVisionTask(systemBuilder);
 
-        if (ifImage)
-            fullSystemMessage
-                .AppendLine("--- VISION TASK: CODE IDENTIFICATION AND SOLUTION ---")
-                .AppendLine("1. Analyze the syntax in the image to strictly identify the programming language.")
-                .AppendLine("2. Look for language-specific indicators.")
-                .AppendLine("3. Fix OCR-induced errors.")
-                .AppendLine("4. Provide a complete solution written ONLY in the SAME language as identified in the image.")
-                .AppendLine("5. Output ONLY the source code.");
+        systemBuilder.AppendLine("\n### USER PERSONA (ME)").AppendLine(userPersona);
 
-        var systemMessage = fullSystemMessage
-            .AppendLine("--- USER PERSONA (ME) ---")
-            .AppendLine(userPersona)
-            .ToString();
+        var userBuilder = new StringBuilder()
+            .AppendLine("### DIALOGUE TRANSCRIPT")
+            .AppendLine(dialogueHistory);
 
-        var contextMessage = new StringBuilder()
-            .AppendLine("--- DIALOGUE TRANSCRIPT ---")
-            .AppendLine(dialogueHistory)
-            .AppendLine("--- TASK: SUGGEST NEXT RESPONSE FOR 'ME' ---")
-            .ToString();
+        if (!string.IsNullOrWhiteSpace(aiResponses))
+        {
+            userBuilder.AppendLine("\n### PREVIOUS AI ANALYSIS (CONTEXT ONLY)").AppendLine(aiResponses);
+        }
+
+        userBuilder.AppendLine("\n### FINAL INSTRUCTION").AppendLine("Suggest next response for ME.");
 
         return new List<ChatMessage>
         {
-            new(ChatRole.System, systemMessage),
-            new(ChatRole.User, contextMessage),
-            //new(ChatRole.Assistant, aiResponces)
+            new(ChatRole.System, systemBuilder.ToString()),
+            new(ChatRole.User, userBuilder.ToString())
         };
     }
 
@@ -62,32 +53,26 @@ public class PromptManager
     {
         var systemPrompt = await LoadPromptAsync(_continuePromptFile);
         var dialogueHistory = _contextService.GetFormattedLog(connectionId, [SpeakerRole.Me, SpeakerRole.Companion]);
+        var aiResponses = _contextService.GetFormattedLog(connectionId, [SpeakerRole.AI]);
 
-        var fullSystemMessage = new StringBuilder()
-            .AppendLine("--- SYSTEM INSTRUCTIONS ---")
-            .AppendLine(systemPrompt);
+        var systemBuilder = new StringBuilder().AppendLine(systemPrompt);
+        if (ifImage) AppendVisionTask(systemBuilder);
 
-        if (ifImage)
-            fullSystemMessage
-                .AppendLine("--- VISION TASK: CODE IDENTIFICATION AND SOLUTION ---")
-                .AppendLine("1. Analyze the syntax in the image to strictly identify the programming language.")
-                .AppendLine("2. Look for language-specific indicators.")
-                .AppendLine("3. Fix OCR-induced errors.")
-                .AppendLine("4. Provide a complete solution written ONLY in the SAME language as identified in the image.")
-                .AppendLine("5. Output ONLY the source code.");
+        var userBuilder = new StringBuilder()
+            .AppendLine("### DIALOGUE TRANSCRIPT")
+            .AppendLine(dialogueHistory);
 
-        var systemMessage = fullSystemMessage.ToString();
+        if (!string.IsNullOrWhiteSpace(aiResponses))
+        {
+            userBuilder.AppendLine("\n### PREVIOUS AI ANALYSIS (CONTEXT ONLY)").AppendLine(aiResponses);
+        }
 
-        var contextMessage = new StringBuilder()
-            .AppendLine("--- DIALOGUE TRANSCRIPT ---")
-            .AppendLine(dialogueHistory)
-            .AppendLine("--- TASK: CONTINUE 'ME'S LAST THOUGHT ---")
-            .ToString();
+        userBuilder.AppendLine("\n### FINAL INSTRUCTION").AppendLine("Continue my last thoughts.");
 
         return new List<ChatMessage>
         {
-            new(ChatRole.System, systemMessage),
-            new(ChatRole.User, contextMessage)
+            new(ChatRole.System, systemBuilder.ToString()),
+            new(ChatRole.User, userBuilder.ToString())
         };
     }
 
@@ -95,34 +80,30 @@ public class PromptManager
     {
         var systemPrompt = await LoadPromptAsync(_followupPromptFile);
         var dialogueHistory = _contextService.GetFormattedLog(connectionId, [SpeakerRole.Me, SpeakerRole.Companion]);
-        var aiResponces = _contextService.GetFormattedLog(connectionId, [SpeakerRole.AI]);
+        var aiResponses = _contextService.GetFormattedLog(connectionId, [SpeakerRole.AI]);
 
-        var fullSystemMessage = new StringBuilder()
-            .AppendLine("--- SYSTEM INSTRUCTIONS ---")
-            .AppendLine(systemPrompt);
+        var systemBuilder = new StringBuilder().AppendLine(systemPrompt);
+        if (ifImage) AppendVisionTask(systemBuilder);
 
-            if (ifImage)
-                fullSystemMessage
-                    .AppendLine("--- VISION TASK: CODE IDENTIFICATION AND SOLUTION ---")
-                    .AppendLine("1. Analyze the syntax in the image to strictly identify the programming language.")
-                    .AppendLine("2. Look for language-specific indicators.")
-                    .AppendLine("3. Fix OCR-induced errors.")
-                    .AppendLine("4. Provide a complete solution written ONLY in the SAME language as identified in the image.")
-                    .AppendLine("5. Output ONLY the source code.");
-
-        var systemMessage = fullSystemMessage.ToString();
-
-        var contextMessage = new StringBuilder()
-            .AppendLine("--- DIALOGUE TRANSCRIPT ---")
+        var userBuilder = new StringBuilder()
+            .AppendLine("### INPUT DATA: DIALOGUE TRANSCRIPT")
+            .AppendLine("Please analyze the following conversation history:")
+            .AppendLine("--- START OF TRANSCRIPT ---")
             .AppendLine(dialogueHistory)
-            .AppendLine("--- TASK: GENERATE 5 FOLLOW-UP QUESTIONS ---")
-            .ToString();
+            .AppendLine("--- END OF TRANSCRIPT ---");
+
+        if (!string.IsNullOrWhiteSpace(aiResponses))
+        {
+            userBuilder.AppendLine("\n### PREVIOUS AI ANALYSIS (CONTEXT ONLY)").AppendLine(aiResponses);
+        }
+
+        userBuilder.AppendLine("\n### FINAL INSTRUCTION")
+            .AppendLine("Based on the transcript above, perform the ANALYTICAL TASK and provide the 5 High-Signal 'Stinger' questions.");
 
         return new List<ChatMessage>
         {
-            new(ChatRole.System, systemMessage),
-            new(ChatRole.User, contextMessage),
-            //new(ChatRole.Assistant, aiResponces)
+            new(ChatRole.System, systemBuilder.ToString()),
+            new(ChatRole.User, userBuilder.ToString())
         };
     }
 
@@ -131,58 +112,43 @@ public class PromptManager
         var systemPrompt = await LoadPromptAsync(_systemPromptFile);
         var userPersona = await LoadPromptAsync(_userContextFile);
         var dialogueHistory = _contextService.GetFormattedLog(connectionId, [SpeakerRole.Me, SpeakerRole.Companion]);
-        var aiResponces = _contextService.GetFormattedLog(connectionId, [SpeakerRole.AI]);
+        var aiResponses = _contextService.GetFormattedLog(connectionId, [SpeakerRole.AI]);
 
-        var fullSystemMessage = new StringBuilder()
-            .AppendLine("--- SYSTEM INSTRUCTIONS ---")
-            .AppendLine(systemPrompt);
+        var systemBuilder = new StringBuilder().AppendLine(systemPrompt);
+        if (ifImage) AppendVisionTask(systemBuilder);
 
-        if (ifImage)
-            fullSystemMessage
-                .AppendLine("--- VISION TASK: CODE IDENTIFICATION AND SOLUTION ---")
-                .AppendLine("1. Analyze the syntax in the image to strictly identify the programming language.")
-                .AppendLine("2. Look for language-specific indicators.")
-                .AppendLine("3. Fix OCR-induced errors.")
-                .AppendLine("4. Provide a complete solution written ONLY in the SAME language as identified in the image.")
-                .AppendLine("5. Output ONLY the source code.");
+        systemBuilder.AppendLine("\n### USER PERSONA (ME)").AppendLine(userPersona);
 
-        var systemMessage = fullSystemMessage
-            .AppendLine("--- USER PERSONA (ME) ---")
-            .AppendLine(userPersona)
-            .ToString();
+        var userBuilder = new StringBuilder()
+            .AppendLine("### CURRENT DIALOGUE TRANSCRIPT")
+            .AppendLine(dialogueHistory);
 
-        var fullUserMessage = new StringBuilder()
-            .AppendLine("--- CURRENT DIALOGUE TRANSCRIPT ---")
-            .AppendLine(dialogueHistory)
-            .AppendLine("--- YOUR TASK ---")
-            .AppendLine(userInstruction)
-            .AppendLine("--- GENERATE NEXT RESPONSE FOR 'ME' NOW ---")
-            .ToString();
+        if (!string.IsNullOrWhiteSpace(aiResponses))
+        {
+            userBuilder.AppendLine("\n### PREVIOUS AI ANALYSIS (CONTEXT ONLY)").AppendLine(aiResponses);
+        }
+
+        userBuilder.AppendLine("\n### FINAL INSTRUCTION").AppendLine(userInstruction);
 
         return new List<ChatMessage>
         {
-            new(ChatRole.System, systemMessage),
-            new(ChatRole.User, fullUserMessage),
-            //new(ChatRole.Assistant, aiResponces)
+            new(ChatRole.System, systemBuilder.ToString()),
+            new(ChatRole.User, userBuilder.ToString())
         };
     }
 
-    public async Task<string> GetSystemPrompt()
-    {
-        var systemPrompt = await LoadPromptAsync(_systemPromptFile);
-        return systemPrompt.ToString();
-    }
+    public async Task<string> GetSystemPrompt() => await LoadPromptAsync(_systemPromptFile);
+    public async Task<string> GetAssistPrompt() => await LoadPromptAsync(_assistPromptFile);
+    public async Task<string> GetFollowupPrompt() => await LoadPromptAsync(_followupPromptFile);
 
-    public async Task<string> GetAssistPromt()
+    private void AppendVisionTask(StringBuilder sb)
     {
-        var systemPrompt = await LoadPromptAsync(_assistPromptFile);
-        return systemPrompt.ToString();
-    }
-
-    public async Task<string> GetFollowupPromt()
-    {
-        var systemPrompt = await LoadPromptAsync(_followupPromptFile);
-        return systemPrompt.ToString();
+        sb.AppendLine("\n--- VISION TASK: CODE IDENTIFICATION AND SOLUTION ---")
+          .AppendLine("1. Analyze the syntax in the image to strictly identify the programming language.")
+          .AppendLine("2. Look for language-specific indicators.")
+          .AppendLine("3. Fix OCR-induced errors.")
+          .AppendLine("4. Provide a complete solution written ONLY in the SAME language as identified in the image.")
+          .AppendLine("5. Output ONLY the source code.");
     }
 
     private async Task<string> LoadPromptAsync(string fileName)

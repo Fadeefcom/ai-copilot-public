@@ -95,9 +95,10 @@ public class ConversationContextService
         lock (session.LockObj)
         {
             var sb = new StringBuilder();
-            foreach (var msg in session.History.Where(r => requiredRoles.Contains(r.Role)))
+            foreach (var msg in session.History.OrderBy(r => r.Timestamp).Where(r => requiredRoles.Contains(r.Role)))
             {
-                sb.AppendLine($"[{msg.Timestamp:HH:mm:ss}]: {msg.Text}");
+                sb.AppendLine($"**{msg.Role}**: {msg.Text}");
+                sb.AppendLine();
             }
             return sb.ToString();
         }
