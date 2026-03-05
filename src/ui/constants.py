@@ -25,7 +25,7 @@ UI_TEXTS = {
         'stop': 'Stop', 
         'say_btn': 'Что сказать', 
         'followup_btn': 'Уточнить', 
-        'assist_btn': 'Помощь с последним вопросом', 
+        'assist_btn': 'Помощь', 
         'lang_label': 'Язык', 
         'smart_btn': 'Smart Mode'
     },

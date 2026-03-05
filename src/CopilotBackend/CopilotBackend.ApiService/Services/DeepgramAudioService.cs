@@ -154,6 +154,9 @@ public class DeepgramAudioService : IDisposable
         private bool _isReconnecting;
         private bool _isDisposed;
 
+        private DateTime _lastAudioSent = DateTime.UtcNow;
+        private CancellationTokenSource? _watchdogCts;
+
         public AudioStreamer(string apiKey, ILogger logger, ConversationContextService ctx, SpeakerRole role, Action<SpeakerRole, string> onMessage)
         {
             _apiKey = apiKey;
@@ -171,6 +174,7 @@ public class DeepgramAudioService : IDisposable
 
             await ConnectWebSocketAsync();
             StartLocalCapture();
+            StartSilenceWatchdog();
         }
 
         private async Task ConnectWebSocketAsync()
@@ -229,12 +233,32 @@ public class DeepgramAudioService : IDisposable
             }
         }
 
+        private void StartSilenceWatchdog()
+        {
+            _watchdogCts = new CancellationTokenSource();
+            _ = Task.Run(async () =>
+            {
+                var silence = new byte[3200];
+
+                while (!_isDisposed && !_watchdogCts.Token.IsCancellationRequested)
+                {
+                    await Task.Delay(1000, _watchdogCts.Token);
+
+                    if ((DateTime.UtcNow - _lastAudioSent).TotalSeconds >= 2)
+                    {
+                        SendAudio(silence);
+                    }
+                }
+            }, _watchdogCts.Token);
+        }
+
         public void SendAudio(byte[] buffer)
         {
             if (_isDisposed || _isReconnecting) return;
 
             try
             {
+                _lastAudioSent = DateTime.UtcNow;
                 _client.SendBinary(buffer);
             }
             catch (Exception ex)
@@ -272,6 +296,7 @@ public class DeepgramAudioService : IDisposable
         public async Task StopAsync()
         {
             _isDisposed = true;
+            _watchdogCts?.Cancel();
             _capture?.StopRecording();
             try { await _client.Stop(); } catch { }
         }
@@ -279,6 +304,8 @@ public class DeepgramAudioService : IDisposable
         public void Dispose()
         {
             _isDisposed = true;
+            _watchdogCts?.Cancel();
+            _watchdogCts?.Dispose();
             _capture?.Dispose();
             _client?.Dispose();
         }
