@@ -17,3 +17,5 @@ src/CopilotBackend/CopilotBackend.ApiService/appsettings.Production.json
 src/CopilotBackend/CopilotBackend.ApiService/logs
 client_debug.log
 .vs
+src/CopilotBackend/CopilotBackend.ApiService/promts/user.md
+src/CopilotBackend/CopilotBackend.ApiService/knowledge_base.json
