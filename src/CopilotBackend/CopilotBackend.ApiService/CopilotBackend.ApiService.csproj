@@ -26,6 +26,9 @@
     </ItemGroup>
 
     <ItemGroup>
+      <None Update="promts\continue.md">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
       <None Update="promts\system.md">
         <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       </None>

@@ -11,6 +11,7 @@ public class PromptManager
     private readonly string _systemPromptFile = "system.md";
     private readonly string _assistPromptFile = "assist.md";
     private readonly string _followupPromptFile = "followup.md";
+    private readonly string _continuePromptFile = "continue.md";
 
     public PromptManager(ConversationContextService contextService, IWebHostEnvironment env)
     {
@@ -53,7 +54,40 @@ public class PromptManager
         {
             new(ChatRole.System, systemMessage),
             new(ChatRole.User, contextMessage),
-            new(ChatRole.Assistant, aiResponces)
+            //new(ChatRole.Assistant, aiResponces)
+        };
+    }
+
+    public async Task<List<ChatMessage>> BuildContinueMessagesAsync(string connectionId, bool ifImage = false)
+    {
+        var systemPrompt = await LoadPromptAsync(_continuePromptFile);
+        var dialogueHistory = _contextService.GetFormattedLog(connectionId, [SpeakerRole.Me, SpeakerRole.Companion]);
+
+        var fullSystemMessage = new StringBuilder()
+            .AppendLine("--- SYSTEM INSTRUCTIONS ---")
+            .AppendLine(systemPrompt);
+
+        if (ifImage)
+            fullSystemMessage
+                .AppendLine("--- VISION TASK: CODE IDENTIFICATION AND SOLUTION ---")
+                .AppendLine("1. Analyze the syntax in the image to strictly identify the programming language.")
+                .AppendLine("2. Look for language-specific indicators.")
+                .AppendLine("3. Fix OCR-induced errors.")
+                .AppendLine("4. Provide a complete solution written ONLY in the SAME language as identified in the image.")
+                .AppendLine("5. Output ONLY the source code.");
+
+        var systemMessage = fullSystemMessage.ToString();
+
+        var contextMessage = new StringBuilder()
+            .AppendLine("--- DIALOGUE TRANSCRIPT ---")
+            .AppendLine(dialogueHistory)
+            .AppendLine("--- TASK: CONTINUE 'ME'S LAST THOUGHT ---")
+            .ToString();
+
+        return new List<ChatMessage>
+        {
+            new(ChatRole.System, systemMessage),
+            new(ChatRole.User, contextMessage)
         };
     }
 
@@ -88,7 +122,7 @@ public class PromptManager
         {
             new(ChatRole.System, systemMessage),
             new(ChatRole.User, contextMessage),
-             new(ChatRole.Assistant, aiResponces)
+            //new(ChatRole.Assistant, aiResponces)
         };
     }
 
@@ -129,7 +163,7 @@ public class PromptManager
         {
             new(ChatRole.System, systemMessage),
             new(ChatRole.User, fullUserMessage),
-             new(ChatRole.Assistant, aiResponces)
+            //new(ChatRole.Assistant, aiResponces)
         };
     }
 

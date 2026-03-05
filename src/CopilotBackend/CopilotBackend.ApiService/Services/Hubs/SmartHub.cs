@@ -51,21 +51,27 @@ public class SmartHub : Hub
         }
     }
 
-    public void SendAudioChunk(string base64Chunk, string role)
-    {
-        if (string.IsNullOrEmpty(base64Chunk)) return;
-
-        var chunk = Convert.FromBase64String(base64Chunk);
-        var speakerRole = role.ToLower() == "me" ? SpeakerRole.Me : SpeakerRole.Companion;
-        _audioService.PushAudio(speakerRole, chunk);
-    }
-
     public void UpdateVisualContext(string base64Image) => _latestScreenshots[Context.ConnectionId] = base64Image;
 
     public async IAsyncEnumerable<string> SendMessage(string text, string model, string? image, [EnumeratorCancellation] CancellationToken ct)
     {
         var connectionId = Context.ConnectionId;
         var chunks = _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.System, model, connectionId, image, text);
+        var aiResponseBuffer = new StringBuilder();
+
+        await foreach (var chunk in chunks.WithCancellation(ct))
+        {
+            aiResponseBuffer.Append(chunk);
+            yield return chunk;
+        }
+
+        _contextService.AddAiResponse(Context.ConnectionId, aiResponseBuffer.ToString());
+    }
+
+    public async IAsyncEnumerable<string> SendContinueRequest(string model, string? image, [EnumeratorCancellation] CancellationToken ct)
+    {
+        var connectionId = Context.ConnectionId;
+        var chunks = _orchestrator.StreamSmartActionAsync(AiOrchestrator.AiActionType.Continue, model, connectionId, image);
         var aiResponseBuffer = new StringBuilder();
 
         await foreach (var chunk in chunks.WithCancellation(ct))

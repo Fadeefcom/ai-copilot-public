@@ -12,7 +12,7 @@ from PyQt6.QtGui import QFont, QColor
 
 from constants import UI_TEXTS, MODELS, SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE
 from widgets import ChatMessage, ChatInput
-from threads import SignalRWorker, AudioCaptureThread, TypingIndicator
+from threads import SignalRWorker, TypingIndicator
 from constants import COLORS
 
 class ChatWindow(QMainWindow):
@@ -304,10 +304,6 @@ class ChatWindow(QMainWindow):
         lang = 'ru' if selected_lang == 'ru' else 'en'
         self.signalr_worker.start_audio(lang)
         
-        self.mic_thread = AudioCaptureThread(self.signalr_worker, role="me")
-        self.mic_thread.start()
-        QTimer.singleShot(500, self._start_speaker_thread)
-        
         self.started = True
         self.update_ui_state(True)
         self.timer.start(1000)
@@ -325,19 +321,8 @@ class ChatWindow(QMainWindow):
                 widget.update_width(new_width)
                 item.setSizeHint(widget.sizeHint())
 
-    def _start_speaker_thread(self):
-        if self.started:
-            self.speaker_thread = AudioCaptureThread(self.signalr_worker, role="companion")
-            self.speaker_thread.start()
-
     def on_stop(self):
         self.stop_typing()
-        if hasattr(self, 'mic_thread') and self.mic_thread:
-            self.mic_thread.stop(); self.mic_thread.wait(500)
-            self.mic_thread = None
-        if hasattr(self, 'speaker_thread') and self.speaker_thread:
-            self.speaker_thread.stop(); self.speaker_thread.wait(500)
-            self.speaker_thread = None
         if self.signalr_worker:
             self.signalr_worker.stop(); self.signalr_worker.wait(1000)
             self.signalr_worker = None
@@ -393,9 +378,10 @@ class ChatWindow(QMainWindow):
         self.signalr_worker.send_screenshot(img)
         self.add_message(self.texts[f'{p_type}_btn'], is_user=True)
         self.start_typing()
-        method = {"say": "SendAssistRequest", "followup": "SendFollowupRequest", "assist": "SendMessage"}[p_type]
+        
+        method = {"say": "SendContinueRequest", "followup": "SendFollowupRequest", "assist": "SendAssistRequest"}[p_type]
         args = [self.model_dropdown.currentText(), img]
-        if p_type == "assist": args.insert(0, self.texts['assist_btn'])
+        
         self.signalr_worker.invoke_stream(method, args)
 
     def on_llm_chunk(self, chunk):

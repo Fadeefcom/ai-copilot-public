@@ -76,15 +76,6 @@ class SignalRWorker(QThread):
                 except: 
                     pass
 
-    def send_audio_chunk(self, chunk, role):
-        if self.connection and self.is_running:
-            with self._send_lock:
-                try:
-                    encoded = base64.b64encode(chunk).decode('utf-8')
-                    self.connection.send("SendAudioChunk", [encoded, role])
-                except Exception as e:
-                    print(f"Send error: {e}")
-
     def send_screenshot(self, img_b64):
         if self.connection and self.is_running:
             with self._send_lock:
@@ -116,96 +107,6 @@ class SignalRWorker(QThread):
                 self.status_received.emit("System: Stopped")
             except:
                 self.status_received.emit("System: Stopped with error")
-
-class AudioCaptureThread(QThread):
-    def __init__(self, worker, role="me"):
-        super().__init__()
-        self.worker = worker
-        self.role = role
-        self.is_running = True
-        self.chunk_size = 2048
-
-    def run(self):
-        p = None
-        stream = None
-        native_rate = 0
-        channels = 0
-        
-        with audio_init_lock:
-            try:
-                p = pyaudio.PyAudio()
-                device_info = None
-                if self.role == "me":
-                    device_info = p.get_default_input_device_info()
-                else:
-                    wasapi_info = next((p.get_host_api_info_by_index(i) 
-                                       for i in range(p.get_host_api_count()) 
-                                       if p.get_host_api_info_by_index(i)['type'] == pyaudio.paWASAPI), None)
-                    if wasapi_info:
-                        default_out = p.get_device_info_by_index(wasapi_info['defaultOutputDevice'])
-                        for i in range(p.get_device_count()):
-                            dev = p.get_device_info_by_index(i)
-                            if dev["isLoopbackDevice"] and default_out["name"] in dev["name"]:
-                                device_info = dev
-                                break
-
-                if not device_info:
-                    if p: p.terminate()
-                    return
-
-                native_rate = int(device_info['defaultSampleRate'])
-                channels = int(device_info['maxInputChannels'])
-                
-                stream = p.open(
-                    format=pyaudio.paInt16,
-                    channels=channels,
-                    rate=native_rate,
-                    input=True,
-                    input_device_index=device_info['index'],
-                    frames_per_buffer=self.chunk_size
-                )
-            except Exception as e:
-                print(f"Failed to init {self.role}: {e}")
-                if p: p.terminate()
-                return
-
-        try:
-            target_rate = 16000
-            while self.is_running:
-                try:
-                    raw_data = stream.read(self.chunk_size, exception_on_overflow=False)
-                    if not raw_data:
-                        continue
-                    
-                    audio_np = np.frombuffer(raw_data, dtype=np.int16).copy()
-                    if channels > 1:
-                        audio_np = audio_np[::channels]
-                    
-                    if np.abs(audio_np).max() == 0:
-                        continue
-
-                    if native_rate != target_rate:
-                        duration = len(audio_np) / native_rate
-                        num_target_samples = int(duration * target_rate)                        
-                        audio_resampled = np.interp(
-                            np.linspace(0, 1, num_target_samples),
-                            np.linspace(0, 1, len(audio_np)),
-                            audio_np
-                        ).astype(np.int16)
-                        self.worker.send_audio_chunk(audio_resampled.tobytes(), self.role)
-                    else:
-                        self.worker.send_audio_chunk(audio_np.tobytes(), self.role)
-                except:
-                    continue
-        finally:
-            if stream:
-                stream.stop_stream()
-                stream.close()
-            if p:
-                p.terminate()
-
-    def stop(self):
-        self.is_running = False
 
 class TypingIndicator(QThread):
     update_signal = pyqtSignal(str)

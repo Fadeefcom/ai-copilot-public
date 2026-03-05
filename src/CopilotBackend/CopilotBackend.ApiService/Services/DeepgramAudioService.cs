@@ -2,6 +2,8 @@
 using Deepgram;
 using Deepgram.Models.Listen.v2.WebSocket;
 using Microsoft.Extensions.Options;
+using NAudio.CoreAudioApi;
+using NAudio.Wave;
 using System.Text;
 
 namespace CopilotBackend.ApiService.Services;
@@ -139,22 +141,39 @@ public class DeepgramAudioService : IDisposable
 
     private class AudioStreamer : IDisposable
     {
-        private readonly ListenWebSocketClient _client;
+        private ListenWebSocketClient _client;
         private readonly ConversationContextService _ctx;
         private readonly Action<SpeakerRole, string> _onMessage;
         private readonly ILogger _logger;
         private readonly SpeakerRole _role;
+        private readonly string _apiKey;
+
+        private WasapiCapture? _capture;
+        private string _language = "ru";
+        private string _connectionId = string.Empty;
+        private bool _isReconnecting;
+        private bool _isDisposed;
 
         public AudioStreamer(string apiKey, ILogger logger, ConversationContextService ctx, SpeakerRole role, Action<SpeakerRole, string> onMessage)
         {
+            _apiKey = apiKey;
             _ctx = ctx;
-            _client = new ListenWebSocketClient(apiKey);
             _logger = logger;
             _role = role;
             _onMessage = onMessage;
+            _client = new ListenWebSocketClient(_apiKey);
         }
 
         public async Task ConnectAsync(string language, string connectionId)
+        {
+            _language = language;
+            _connectionId = connectionId;
+
+            await ConnectWebSocketAsync();
+            StartLocalCapture();
+        }
+
+        private async Task ConnectWebSocketAsync()
         {
             await _client.Subscribe((_, e) =>
             {
@@ -162,7 +181,7 @@ public class DeepgramAudioService : IDisposable
                 if (!string.IsNullOrWhiteSpace(transcript))
                 {
                     _logger.LogInformation($"[Speech-to-Text] {_role}: {transcript}");
-                    _ctx.AddMessage(connectionId, _role, transcript);
+                    _ctx.AddMessage(_connectionId, _role, transcript);
                     _onMessage(_role, transcript);
                 }
             });
@@ -170,29 +189,98 @@ public class DeepgramAudioService : IDisposable
             var schema = new LiveSchema
             {
                 Model = "nova-3",
-                Language = language,
+                Language = _language,
                 Encoding = "linear16",
                 SampleRate = 16000,
                 Channels = 1,
                 SmartFormat = true,
-                InterimResults = false
+                InterimResults = false,
+                EndPointing = "100"
             };
+
             await _client.Connect(schema);
+        }
+
+        private void StartLocalCapture()
+        {
+            if (_capture != null) return; // Захват уже запущен
+
+            var dataFlow = _role == SpeakerRole.Me ? DataFlow.Capture : DataFlow.Render;
+            var enumerator = new MMDeviceEnumerator();
+            var device = enumerator.GetDefaultAudioEndpoint(dataFlow, Role.Console);
+
+            if (device != null)
+            {
+                _capture = dataFlow == DataFlow.Render
+                    ? new WasapiLoopbackCapture(device) { WaveFormat = new WaveFormat(16000, 16, 1) }
+                    : new WasapiCapture(device) { WaveFormat = new WaveFormat(16000, 16, 1) };
+
+                _capture.DataAvailable += (_, e) =>
+                {
+                    if (e.BytesRecorded > 0)
+                    {
+                        var buffer = new byte[e.BytesRecorded];
+                        Array.Copy(e.Buffer, buffer, e.BytesRecorded);
+                        SendAudio(buffer);
+                    }
+                };
+
+                _capture.StartRecording();
+            }
         }
 
         public void SendAudio(byte[] buffer)
         {
-            _client.SendBinary(buffer);
+            if (_isDisposed || _isReconnecting) return;
+
+            try
+            {
+                _client.SendBinary(buffer);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"[Deepgram] {_role} socket error: {ex.Message}. Reconnecting...");
+                _ = ReconnectAsync();
+            }
+        }
+
+        private async Task ReconnectAsync()
+        {
+            if (_isReconnecting || _isDisposed) return;
+            _isReconnecting = true;
+
+            try
+            {
+                try { await _client.Stop(); } catch { }
+                _client.Dispose();
+
+                _client = new ListenWebSocketClient(_apiKey);
+                await ConnectWebSocketAsync();
+
+                _logger.LogInformation($"[Deepgram] {_role} reconnected successfully.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[Deepgram] {_role} reconnect failed.");
+            }
+            finally
+            {
+                _isReconnecting = false;
+            }
         }
 
         public async Task StopAsync()
         {
-            await _client.Stop();
+            _isDisposed = true;
+            _capture?.StopRecording();
+            try { await _client.Stop(); } catch { }
         }
 
         public void Dispose()
         {
-            _client.Dispose();
+            _isDisposed = true;
+            _capture?.Dispose();
+            _client?.Dispose();
         }
     }
 }

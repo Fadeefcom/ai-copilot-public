@@ -5,5 +5,3 @@ signalrcore
 Pillow
 keyboard
 websocket-client>=1.8.0,<2.0
-PyAudioWPATCH
-numpy

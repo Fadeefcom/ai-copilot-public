@@ -41,6 +41,15 @@ public static class RouteExtensions
                 req.Image));
         });
 
+        api.MapPost("/continue", async (HttpContext ctx, [FromBody] AiRequest req, [FromServices] AiOrchestrator orchestrator) =>
+        {
+            await HandleSseStream(ctx, orchestrator.StreamSmartActionAsync(
+                AiOrchestrator.AiActionType.Continue,
+                req.Model,
+                req.ConnectionId,
+                req.Image));
+        });
+
         api.MapPost("/audio/start", async ([FromServices] DeepgramAudioService svc, [FromQuery] string connectionId, [FromQuery] string language = "ru") =>
         {
             if (string.IsNullOrEmpty(connectionId)) return Results.BadRequest("ConnectionId is required");

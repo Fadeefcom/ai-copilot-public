@@ -126,6 +126,7 @@ public class AiOrchestrator
             {
                 AiActionType.Assist => await _promptManager.BuildAssistMessagesAsync(connectionId, hasImage),
                 AiActionType.Followup => await _promptManager.BuildFollowupMessagesAsync(connectionId, hasImage),
+                AiActionType.Continue => await _promptManager.BuildContinueMessagesAsync(connectionId, hasImage),
                 _ => await _promptManager.BuildRequestMessagesAsync(connectionId, userText ?? "", hasImage)
             };
         }
@@ -180,6 +181,7 @@ public class AiOrchestrator
     {
         System,
         Assist,
-        Followup
+        Followup,
+        Continue
     }
 }
